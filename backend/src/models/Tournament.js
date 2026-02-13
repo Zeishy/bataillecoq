@@ -36,6 +36,10 @@ const tournamentSchema = new mongoose.Schema({
     enum: ['upcoming', 'ongoing', 'completed', 'cancelled'],
     default: 'upcoming'
   },
+  manualStatusOverride: {
+    type: Boolean,
+    default: false
+  },
   maxTeams: {
     type: Number,
     required: true,
@@ -65,6 +69,10 @@ const tournamentSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Match'
   }],
+  bracket: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
   standings: [{
     teamId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -175,11 +183,9 @@ tournamentSchema.virtual('currentStatus').get(function() {
 
 // Middleware to update status before saving
 tournamentSchema.pre('save', function(next) {
-  // Auto-update status based on dates
-  const calculatedStatus = this.calculateStatus();
-  
-  // Only auto-update if not manually set to 'cancelled'
-  if (this.status !== 'cancelled') {
+  // Only auto-update status if not manually overridden
+  if (!this.manualStatusOverride && this.status !== 'cancelled' && this.status !== 'completed') {
+    const calculatedStatus = this.calculateStatus();
     this.status = calculatedStatus;
   }
   
@@ -188,7 +194,11 @@ tournamentSchema.pre('save', function(next) {
 
 // Static method to update all tournament statuses
 tournamentSchema.statics.updateAllStatuses = async function() {
-  const tournaments = await this.find({ status: { $ne: 'cancelled' } });
+  // Only update tournaments without manual override and not cancelled/completed
+  const tournaments = await this.find({ 
+    manualStatusOverride: { $ne: true },
+    status: { $nin: ['cancelled', 'completed'] }
+  });
   let updated = 0;
   
   for (const tournament of tournaments) {

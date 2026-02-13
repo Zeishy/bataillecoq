@@ -207,7 +207,7 @@ const Rankings = () => {
                             {team.game}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-gray-400">{team.members.length}</td>
+                        <td className="px-6 py-4 text-gray-400">{team.players?.length || 0}</td>
                         <td className="px-6 py-4">
                           <span className="text-lg font-bold text-reunion-gold">{team.points}</span>
                         </td>

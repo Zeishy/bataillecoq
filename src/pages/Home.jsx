@@ -164,7 +164,7 @@ const Home = () => {
                     <div className="flex items-center text-sm text-gray-400">
                       <span className="mr-4">{team.game}</span>
                       <Users size={14} className="mr-1" />
-                      {team.members.length} membres
+                      {team.players?.length || 0} membres
                     </div>
                   </div>
                   <div className="text-right">

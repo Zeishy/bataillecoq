@@ -4,7 +4,8 @@ import {
   login,
   getMe,
   linkAccount,
-  updateProfile
+  updateProfile,
+  searchUsers
 } from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
 import {
@@ -20,5 +21,6 @@ router.post('/login', loginValidation, validate, login);
 router.get('/me', protect, getMe);
 router.put('/link-account', protect, linkAccount);
 router.put('/profile', protect, updateProfile);
+router.get('/search', protect, searchUsers);
 
 export default router;

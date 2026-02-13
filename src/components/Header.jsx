@@ -2,6 +2,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Trophy, Users, BarChart3, User, LogIn, LogOut, UserPlus, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import NotificationCenter from './NotificationCenter';
+import MobileNav from './MobileNav';
 
 const Header = () => {
   const location = useLocation();
@@ -17,18 +19,18 @@ const Header = () => {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-dark-800/90 backdrop-blur-md border-b border-reunion-red/20">
-      <nav className="container mx-auto px-4 py-4">
+      <nav className="container mx-auto px-4 py-3 md:py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 group">
             <motion.div
               whileHover={{ rotate: 360 }}
               transition={{ duration: 0.6 }}
-              className="text-4xl"
+              className="text-3xl md:text-4xl"
             >
               🐓
             </motion.div>
-            <span className="text-2xl font-bold text-gradient">BatailleCoq</span>
+            <span className="text-xl md:text-2xl font-bold text-gradient">BatailleCoq</span>
           </Link>
 
           {/* Navigation */}
@@ -90,6 +92,9 @@ const Header = () => {
             <div className="ml-4 flex items-center gap-2">
               {isAuthenticated ? (
                 <>
+                  {/* Notification Center */}
+                  <NotificationCenter userId={user?._id} />
+                  
                   <div className="flex items-center gap-2 px-3 py-1 bg-dark-700 rounded-lg">
                     <User size={16} className="text-reunion-gold" />
                     <span className="text-sm text-white">{user?.username}</span>
@@ -131,35 +136,11 @@ const Header = () => {
             </div>
           </div>
 
-          {/* Mobile menu button */}
-          <button className="md:hidden text-white">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Mobile Navigation */}
-        <div className="md:hidden mt-4 space-y-2">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                  isActive 
-                    ? 'bg-reunion-red/20 text-reunion-gold' 
-                    : 'text-gray-300 hover:bg-dark-700'
-                }`}
-              >
-                <Icon size={18} />
-                <span>{item.name}</span>
-              </Link>
-            );
-          })}
+          {/* Mobile Navigation & Notifications */}
+          <div className="flex md:hidden items-center gap-2">
+            {isAuthenticated && <NotificationCenter userId={user?._id} />}
+            <MobileNav />
+          </div>
         </div>
       </nav>
     </header>

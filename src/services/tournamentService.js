@@ -15,6 +15,12 @@ export const tournamentService = {
     return response.data;
   },
 
+  // Obtenir un tournoi par ID (alias)
+  getTournamentById: async (id) => {
+    const response = await api.get(`/tournaments/${id}`);
+    return response.data;
+  },
+
   // Créer un tournoi (admin)
   createTournament: async (tournamentData) => {
     const response = await api.post('/tournaments', tournamentData);
@@ -45,6 +51,42 @@ export const tournamentService = {
     return response.data;
   },
 
+  // Approuver une équipe (admin)
+  approveTeam: async (tournamentId, teamId) => {
+    const response = await api.post(`/tournaments/${tournamentId}/teams/${teamId}/approve`);
+    return response.data;
+  },
+
+  // Rejeter une équipe (admin)
+  rejectTeam: async (tournamentId, teamId) => {
+    const response = await api.post(`/tournaments/${tournamentId}/teams/${teamId}/reject`);
+    return response.data;
+  },
+
+  // Générer le planning des matchs (admin)
+  generateSchedule: async (tournamentId) => {
+    const response = await api.post(`/tournaments/${tournamentId}/generate-schedule`);
+    return response.data;
+  },
+
+  // Démarrer un tournoi (admin)
+  startTournament: async (tournamentId) => {
+    const response = await api.patch(`/tournaments/${tournamentId}/start`);
+    return response.data;
+  },
+
+  // Terminer un tournoi (admin)
+  endTournament: async (tournamentId) => {
+    const response = await api.patch(`/tournaments/${tournamentId}/end`);
+    return response.data;
+  },
+
+  // Annuler un tournoi (admin)
+  cancelTournament: async (tournamentId) => {
+    const response = await api.patch(`/tournaments/${tournamentId}/cancel`);
+    return response.data;
+  },
+
   // Obtenir le classement d'un tournoi
   getStandings: async (tournamentId) => {
     const response = await api.get(`/tournaments/${tournamentId}/standings`);
@@ -54,6 +96,18 @@ export const tournamentService = {
   // Obtenir les matchs d'un tournoi
   getMatches: async (tournamentId) => {
     const response = await api.get(`/tournaments/${tournamentId}/matches`);
+    return response.data;
+  },
+
+  // Générer le bracket (admin)
+  generateBracket: async (tournamentId) => {
+    const response = await api.post(`/tournaments/${tournamentId}/generate-bracket`);
+    return response.data;
+  },
+
+  // Obtenir le bracket d'un tournoi
+  getBracket: async (tournamentId) => {
+    const response = await api.get(`/tournaments/${tournamentId}/bracket`);
     return response.data;
   },
 

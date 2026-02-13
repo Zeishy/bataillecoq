@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Edit, Trash2, Calendar, Trophy, Users, DollarSign, Save, X } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, Trophy, Users, DollarSign, Save, X, Eye } from 'lucide-react';
 import toast from 'react-hot-toast';
 import tournamentService from '../services/tournamentService';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 const AdminTournaments = () => {
+  const navigate = useNavigate();
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -255,11 +257,19 @@ const AdminTournaments = () => {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
+                    onClick={() => navigate(`/admin/tournaments/${tournament._id}`)}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+                  >
+                    <Eye className="w-4 h-4" />
+                    Gérer
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => handleOpenModal(tournament)}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg transition-colors"
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-dark-700 hover:bg-dark-600 text-white rounded-lg transition-colors"
                   >
                     <Edit className="w-4 h-4" />
-                    Modifier
                   </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.05 }}

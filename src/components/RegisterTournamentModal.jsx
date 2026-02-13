@@ -253,7 +253,7 @@ export default function RegisterTournamentModal({ isOpen, onClose, tournament, o
                                   <div>
                                     <p className="text-white font-medium">{team.name}</p>
                                     <p className="text-sm text-gray-400">
-                                      {team.members?.length || 0} membre(s)
+                                      {team.players?.length || 0} membre(s)
                                     </p>
                                   </div>
                                 </div>

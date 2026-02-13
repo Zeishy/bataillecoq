@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Search, Plus, Loader } from 'lucide-react';
+import { Users, Search, Plus, Loader, Settings } from 'lucide-react';
 import { teamService } from '../services/teamService';
 import { useAuth } from '../context/AuthContext';
 import CreateTeamModal from '../components/CreateTeamModal';
+import ManageTeamModal from '../components/ManageTeamModal';
 import toast from 'react-hot-toast';
 
 const Teams = () => {
@@ -12,6 +13,8 @@ const Teams = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGame, setSelectedGame] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false);
+  const [teamToManage, setTeamToManage] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [joiningTeamId, setJoiningTeamId] = useState(null);
@@ -74,6 +77,17 @@ const Teams = () => {
     if (team.captainId?._id === user._id) return true;
     // Check if user is in players
     return team.players?.some(p => p.playerId?.userId?._id === user._id);
+  };
+
+  const isUserCaptain = (team) => {
+    if (!user) return false;
+    return team.captainId?._id === user._id || team.captainId === user._id;
+  };
+
+  const handleManageTeam = (team, e) => {
+    e.stopPropagation();
+    setTeamToManage(team);
+    setShowManageModal(true);
   };
 
   const filteredTeams = teams.filter(team =>
@@ -200,7 +214,15 @@ const Teams = () => {
 
                 {/* Join Team Button */}
                 <div className="mt-4">
-                  {isUserInTeam(team) ? (
+                  {isUserCaptain(team) ? (
+                    <button
+                      onClick={(e) => handleManageTeam(team, e)}
+                      className="w-full px-4 py-2 bg-reunion-yellow text-dark-900 rounded-lg font-semibold transition-all hover:bg-reunion-yellow/80 flex items-center justify-center"
+                    >
+                      <Settings className="w-5 h-5 mr-2" />
+                      Gérer l'équipe
+                    </button>
+                  ) : isUserInTeam(team) ? (
                     <button
                       disabled
                       className="w-full px-4 py-2 bg-reunion-green/20 text-reunion-green rounded-lg font-semibold cursor-not-allowed"
@@ -241,6 +263,17 @@ const Teams = () => {
       <CreateTeamModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
+        onSuccess={fetchTeams}
+      />
+
+      {/* Manage Team Modal */}
+      <ManageTeamModal
+        isOpen={showManageModal}
+        onClose={() => {
+          setShowManageModal(false);
+          setTeamToManage(null);
+        }}
+        team={teamToManage}
         onSuccess={fetchTeams}
       />
 

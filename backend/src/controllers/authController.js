@@ -218,10 +218,45 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+// @desc    Search users by username
+// @route   GET /api/users/search
+// @access  Private
+export const searchUsers = async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query must be at least 2 characters'
+      });
+    }
+
+    const users = await User.find({
+      username: { $regex: q, $options: 'i' },
+      _id: { $ne: req.user._id } // Exclude current user
+    })
+      .select('username email avatar')
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      users
+    });
+  } catch (error) {
+    console.error('Search users error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 export default {
   register,
   login,
   getMe,
   linkAccount,
-  updateProfile
+  updateProfile,
+  searchUsers
 };

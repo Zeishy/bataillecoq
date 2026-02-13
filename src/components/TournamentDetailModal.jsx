@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, 
@@ -11,15 +11,59 @@ import {
   Gamepad2,
   Award,
   Clock,
-  TrendingUp
+  TrendingUp,
+  Target
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import tournamentService from '../services/tournamentService';
+import TournamentBracket from './TournamentBracket';
 
 export default function TournamentDetailModal({ isOpen, onClose, tournament, onRegister }) {
   const [activeTab, setActiveTab] = useState('info');
+  const [bracket, setBracket] = useState(null);
+  const [matches, setMatches] = useState([]);
+  const [tournamentData, setTournamentData] = useState(tournament);
+
+  useEffect(() => {
+    if (isOpen && tournament) {
+      fetchTournamentData();
+    }
+  }, [isOpen, tournament]);
+
+  const fetchTournamentData = async () => {
+    try {
+      // Fetch full tournament data with populated fields
+      const response = await tournamentService.getTournamentById(tournament._id);
+      console.log('Tournament data:', response);
+      
+      // Set tournament data and matches from the response
+      if (response.tournament) {
+        setTournamentData(response.tournament);
+        setMatches(response.tournament.matches || []);
+        console.log('Tournament standings:', response.tournament.standings);
+        
+        // Fetch bracket if elimination format
+        if (tournament.format === 'single-elimination' || tournament.format === 'double-elimination') {
+          try {
+            const bracketData = await tournamentService.getBracket(tournament._id);
+            console.log('Bracket data:', bracketData);
+            setBracket(bracketData.bracket || bracketData);
+          } catch (error) {
+            console.error('Error fetching bracket:', error);
+            // Bracket might not exist yet, that's okay
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching tournament data:', error);
+    }
+  };
 
   if (!tournament) return null;
+
+  // Use tournamentData if available, otherwise use tournament prop
+  const displayTournament = tournamentData || tournament;
 
   const tabs = [
     { id: 'info', label: 'Informations', icon: Info },
@@ -27,6 +71,11 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
     { id: 'matches', label: 'Matchs', icon: Gamepad2 },
     { id: 'standings', label: 'Classement', icon: TrendingUp }
   ];
+
+  // Add bracket tab for elimination tournaments
+  if (displayTournament.format === 'single-elimination' || displayTournament.format === 'double-elimination') {
+    tabs.splice(3, 0, { id: 'bracket', label: 'Bracket', icon: Target });
+  }
 
   const getStatusBadge = (status) => {
     const badges = {
@@ -48,7 +97,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
     return badges[status] || badges.pending;
   };
 
-  const statusBadge = getStatusBadge(tournament.status);
+  const statusBadge = getStatusBadge(displayTournament.status);
 
   return (
     <AnimatePresence>
@@ -81,10 +130,10 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                         <Trophy className="w-7 h-7 text-white" />
                       </div>
                       <div>
-                        <h2 className="text-2xl font-bold text-white">{tournament.name}</h2>
+                        <h2 className="text-2xl font-bold text-white">{displayTournament.name}</h2>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="px-3 py-1 bg-reunion-green/20 text-reunion-green rounded-full text-xs uppercase font-bold">
-                            {tournament.game}
+                            {displayTournament.game}
                           </span>
                           <span className={`px-3 py-1 rounded-full text-xs font-bold border ${statusBadge.class}`}>
                             {statusBadge.text}
@@ -92,8 +141,8 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                         </div>
                       </div>
                     </div>
-                    {tournament.description && (
-                      <p className="text-gray-400 text-sm mt-3">{tournament.description}</p>
+                    {displayTournament.description && (
+                      <p className="text-gray-400 text-sm mt-3">{displayTournament.description}</p>
                     )}
                   </div>
                   <button
@@ -112,7 +161,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <span className="text-xs">Début</span>
                     </div>
                     <p className="text-white font-bold text-sm">
-                      {format(new Date(tournament.startDate), 'dd MMM yyyy', { locale: fr })}
+                      {format(new Date(displayTournament.startDate), 'dd MMM yyyy', { locale: fr })}
                     </p>
                   </div>
                   <div className="bg-dark-700 rounded-lg p-3">
@@ -121,7 +170,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <span className="text-xs">Équipes</span>
                     </div>
                     <p className="text-white font-bold text-sm">
-                      {tournament.registeredTeams?.length || 0} / {tournament.maxTeams}
+                      {displayTournament.registeredTeams?.length || 0} / {displayTournament.maxTeams}
                     </p>
                   </div>
                   <div className="bg-dark-700 rounded-lg p-3">
@@ -169,6 +218,92 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                 {/* Info Tab */}
                 {activeTab === 'info' && (
                   <div className="space-y-6">
+                    {/* Podium for completed tournaments */}
+                    {displayTournament.status === 'completed' && displayTournament.standings && displayTournament.standings.length > 0 && (
+                      <div>
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                          <Trophy className="w-5 h-5 text-reunion-gold" />
+                          Podium Final
+                        </h3>
+                        <div className="flex items-end justify-center gap-4 mb-6">
+                          {/* 2nd place */}
+                          {displayTournament.standings[1] && displayTournament.standings[1].teamId && (
+                            <div className="flex flex-col items-center">
+                              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-gray-300 to-gray-500 flex items-center justify-center mb-2 border-4 border-gray-400">
+                                {displayTournament.standings[1].teamId.logo ? (
+                                  <img 
+                                    src={displayTournament.standings[1].teamId.logo} 
+                                    alt={displayTournament.standings[1].teamId.name}
+                                    className="w-16 h-16 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="text-3xl font-bold text-white">
+                                    2
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-center">
+                                <p className="text-2xl mb-1">🥈</p>
+                                <p className="text-white font-bold text-sm">{displayTournament.standings[1].teamId.name}</p>
+                                <p className="text-gray-400 text-xs">{displayTournament.standings[1].points} pts</p>
+                              </div>
+                              <div className="w-24 h-20 bg-gradient-to-t from-gray-400/30 to-gray-400/10 rounded-t-lg mt-2"></div>
+                            </div>
+                          )}
+
+                          {/* 1st place */}
+                          {displayTournament.standings[0] && displayTournament.standings[0].teamId && (
+                            <div className="flex flex-col items-center">
+                              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-reunion-gold to-yellow-600 flex items-center justify-center mb-2 border-4 border-reunion-gold shadow-lg shadow-reunion-gold/50">
+                                {displayTournament.standings[0].teamId.logo ? (
+                                  <img 
+                                    src={displayTournament.standings[0].teamId.logo} 
+                                    alt={displayTournament.standings[0].teamId.name}
+                                    className="w-20 h-20 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="text-4xl font-bold text-white">
+                                    1
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-center">
+                                <p className="text-3xl mb-1">🥇</p>
+                                <p className="text-white font-bold">{displayTournament.standings[0].teamId.name}</p>
+                                <p className="text-reunion-gold font-bold text-sm">{displayTournament.standings[0].points} pts</p>
+                              </div>
+                              <div className="w-28 h-28 bg-gradient-to-t from-reunion-gold/30 to-reunion-gold/10 rounded-t-lg mt-2"></div>
+                            </div>
+                          )}
+
+                          {/* 3rd place */}
+                          {displayTournament.standings[2] && displayTournament.standings[2].teamId && (
+                            <div className="flex flex-col items-center">
+                              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-700 to-amber-900 flex items-center justify-center mb-2 border-4 border-amber-700">
+                                {displayTournament.standings[2].teamId.logo ? (
+                                  <img 
+                                    src={displayTournament.standings[2].teamId.logo} 
+                                    alt={displayTournament.standings[2].teamId.name}
+                                    className="w-16 h-16 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="text-3xl font-bold text-white">
+                                    3
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-center">
+                                <p className="text-2xl mb-1">🥉</p>
+                                <p className="text-white font-bold text-sm">{displayTournament.standings[2].teamId.name}</p>
+                                <p className="text-gray-400 text-xs">{displayTournament.standings[2].points} pts</p>
+                              </div>
+                              <div className="w-24 h-16 bg-gradient-to-t from-amber-700/30 to-amber-700/10 rounded-t-lg mt-2"></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
                         <Info className="w-5 h-5 text-reunion-green" />
@@ -177,52 +312,52 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <div className="bg-dark-700 rounded-lg p-4 space-y-3">
                         <div className="flex justify-between">
                           <span className="text-gray-400">Format</span>
-                          <span className="text-white font-medium">{tournament.format || 'Simple élimination'}</span>
+                          <span className="text-white font-medium">{displayTournament.format || 'Simple élimination'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">Date de début</span>
                           <span className="text-white font-medium">
-                            {format(new Date(tournament.startDate), 'dd MMMM yyyy à HH:mm', { locale: fr })}
+                            {format(new Date(displayTournament.startDate), 'dd MMMM yyyy à HH:mm', { locale: fr })}
                           </span>
                         </div>
-                        {tournament.endDate && (
+                        {displayTournament.endDate && (
                           <div className="flex justify-between">
                             <span className="text-gray-400">Date de fin</span>
                             <span className="text-white font-medium">
-                              {format(new Date(tournament.endDate), 'dd MMMM yyyy à HH:mm', { locale: fr })}
+                              {format(new Date(displayTournament.endDate), 'dd MMMM yyyy à HH:mm', { locale: fr })}
                             </span>
                           </div>
                         )}
                         <div className="flex justify-between">
                           <span className="text-gray-400">Places disponibles</span>
                           <span className={`font-bold ${
-                            (tournament.registeredTeams?.length || 0) >= tournament.maxTeams
+                            (displayTournament.registeredTeams?.length || 0) >= displayTournament.maxTeams
                               ? 'text-red-400'
                               : 'text-green-400'
                           }`}>
-                            {tournament.maxTeams - (tournament.registeredTeams?.length || 0)} / {tournament.maxTeams}
+                            {displayTournament.maxTeams - (displayTournament.registeredTeams?.length || 0)} / {displayTournament.maxTeams}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {tournament.rules && (
+                    {displayTournament.rules && (
                       <div>
                         <h3 className="text-lg font-bold text-white mb-3">Règlement</h3>
                         <div className="bg-dark-700 rounded-lg p-4">
-                          <p className="text-gray-300 text-sm whitespace-pre-line">{tournament.rules}</p>
+                          <p className="text-gray-300 text-sm whitespace-pre-line">{displayTournament.rules}</p>
                         </div>
                       </div>
                     )}
 
-                    {tournament.prizes && tournament.prizes.length > 0 && (
+                    {displayTournament.prizes && displayTournament.prizes.length > 0 && (
                       <div>
                         <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
                           <Award className="w-5 h-5 text-reunion-gold" />
                           Récompenses
                         </h3>
                         <div className="space-y-2">
-                          {tournament.prizes.map((prize, index) => (
+                          {displayTournament.prizes.map((prize, index) => (
                             <div key={index} className="bg-dark-700 rounded-lg p-3 flex justify-between items-center">
                               <span className="text-gray-300">
                                 {index === 0 && '🥇'} {index === 1 && '🥈'} {index === 2 && '🥉'}
@@ -242,11 +377,11 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                   <div>
                     <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                       <Users className="w-5 h-5 text-reunion-green" />
-                      Équipes inscrites ({tournament.registeredTeams?.length || 0}/{tournament.maxTeams})
+                      Équipes inscrites ({displayTournament.registeredTeams?.length || 0}/{displayTournament.maxTeams})
                     </h3>
-                    {tournament.registeredTeams && tournament.registeredTeams.length > 0 ? (
+                    {displayTournament.registeredTeams && displayTournament.registeredTeams.length > 0 ? (
                       <div className="grid md:grid-cols-2 gap-3">
-                        {tournament.registeredTeams.map((registered, index) => {
+                        {displayTournament.registeredTeams.map((registered, index) => {
                           const team = registered.teamId || registered;
                           return (
                             <div
@@ -295,9 +430,9 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <Gamepad2 className="w-5 h-5 text-reunion-green" />
                       Matchs du tournoi
                     </h3>
-                    {tournament.matches && tournament.matches.length > 0 ? (
+                    {matches && matches.length > 0 ? (
                       <div className="space-y-3">
-                        {tournament.matches.map((match) => {
+                        {matches.map((match) => {
                           const matchStatus = getMatchStatusBadge(match.status);
                           return (
                             <div
@@ -310,35 +445,63 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                                   {matchStatus.text}
                                 </span>
                               </div>
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3 flex-1">
+                                  {match.team1?.teamId?.logo && (
+                                    <img 
+                                      src={match.team1.teamId.logo} 
+                                      alt={match.team1.teamId.name}
+                                      className="w-8 h-8 rounded object-cover"
+                                    />
+                                  )}
                                   <div className="text-right flex-1">
                                     <p className="text-white font-bold">
                                       {match.team1?.teamId?.name || 'TBD'}
                                     </p>
                                   </div>
-                                  {match.status === 'completed' && (
-                                    <div className="bg-dark-800 px-3 py-2 rounded-lg">
-                                      <span className={`font-bold ${match.winner?.toString() === match.team1?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
-                                        {match.team1?.score || 0}
-                                      </span>
-                                      <span className="text-gray-500 mx-2">-</span>
-                                      <span className={`font-bold ${match.winner?.toString() === match.team2?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
-                                        {match.team2?.score || 0}
-                                      </span>
-                                    </div>
-                                  )}
+                                </div>
+                                
+                                {match.status === 'completed' && (
+                                  <div className="bg-dark-800 px-4 py-2 rounded-lg flex items-center gap-2">
+                                    <span className={`font-bold text-lg ${match.winner?.toString() === match.team1?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
+                                      {match.team1?.score || 0}
+                                    </span>
+                                    <span className="text-gray-500 font-bold">-</span>
+                                    <span className={`font-bold text-lg ${match.winner?.toString() === match.team2?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
+                                      {match.team2?.score || 0}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                <div className="flex items-center gap-3 flex-1">
                                   <div className="flex-1">
                                     <p className="text-white font-bold">
                                       {match.team2?.teamId?.name || 'TBD'}
                                     </p>
                                   </div>
+                                  {match.team2?.teamId?.logo && (
+                                    <img 
+                                      src={match.team2.teamId.logo} 
+                                      alt={match.team2.teamId.name}
+                                      className="w-8 h-8 rounded object-cover"
+                                    />
+                                  )}
                                 </div>
                               </div>
-                              {match.scheduledAt && (
+                              {match.scheduledDate && (
                                 <div className="mt-3 pt-3 border-t border-dark-600 flex items-center gap-2 text-xs text-gray-400">
                                   <Clock className="w-3 h-3" />
-                                  {format(new Date(match.scheduledAt), "dd MMMM yyyy 'à' HH:mm", { locale: fr })}
+                                  {format(new Date(match.scheduledDate), "dd MMMM yyyy 'à' HH:mm", { locale: fr })}
+                                </div>
+                              )}
+                              {match.status === 'completed' && match.winner && (
+                                <div className="mt-2 flex items-center gap-2 text-xs">
+                                  <Trophy className="w-3 h-3 text-reunion-gold" />
+                                  <span className="text-reunion-green font-bold">
+                                    Vainqueur: {match.winner.toString() === match.team1?.teamId?._id?.toString() 
+                                      ? match.team1.teamId.name 
+                                      : match.team2?.teamId?.name}
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -355,6 +518,25 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                   </div>
                 )}
 
+                {/* Bracket Tab */}
+                {activeTab === 'bracket' && (
+                  <div>
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                      <Target className="w-5 h-5 text-reunion-green" />
+                      Arbre du tournoi
+                    </h3>
+                    {bracket ? (
+                      <TournamentBracket bracket={bracket} />
+                    ) : (
+                      <div className="text-center py-12">
+                        <Target className="w-16 h-16 text-gray-600 mx-auto mb-3" />
+                        <p className="text-gray-400">L'arbre n'est pas encore disponible</p>
+                        <p className="text-gray-500 text-sm mt-1">Il sera généré après le début du tournoi</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Standings Tab */}
                 {activeTab === 'standings' && (
                   <div>
@@ -362,7 +544,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <TrendingUp className="w-5 h-5 text-reunion-green" />
                       Classement actuel
                     </h3>
-                    {tournament.standings && tournament.standings.length > 0 ? (
+                    {displayTournament.standings && displayTournament.standings.length > 0 ? (
                       <div className="bg-dark-700 rounded-lg overflow-hidden">
                         <table className="w-full">
                           <thead className="bg-dark-600">
@@ -375,7 +557,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-dark-600">
-                            {tournament.standings
+                            {displayTournament.standings
                               .sort((a, b) => a.rank - b.rank)
                               .map((standing, index) => {
                                 const team = standing.teamId;
@@ -391,12 +573,8 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-2">
-                                        {team?.logo ? (
+                                        {team?.logo && (
                                           <img src={team.logo} alt={team.name} className="w-6 h-6 rounded" />
-                                        ) : (
-                                          <div className="w-6 h-6 bg-dark-500 rounded flex items-center justify-center text-xs">
-                                            {team?.name?.charAt(0) || '?'}
-                                          </div>
                                         )}
                                         <span className="text-white font-medium">{team?.name || 'TBD'}</span>
                                       </div>
@@ -428,15 +606,15 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
               </div>
 
               {/* Footer */}
-              {tournament.status === 'upcoming' && onRegister && (
+              {displayTournament.status === 'upcoming' && onRegister && (
                 <div className="p-6 border-t border-dark-700 bg-dark-700/50">
                   <button
                     onClick={onRegister}
-                    disabled={(tournament.registeredTeams?.length || 0) >= tournament.maxTeams}
+                    disabled={(displayTournament.registeredTeams?.length || 0) >= displayTournament.maxTeams}
                     className="w-full px-6 py-3 bg-reunion-green hover:bg-reunion-green/80 text-white rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <Trophy className="w-5 h-5" />
-                    {(tournament.registeredTeams?.length || 0) >= tournament.maxTeams
+                    {(displayTournament.registeredTeams?.length || 0) >= displayTournament.maxTeams
                       ? 'Tournoi complet'
                       : 'S\'inscrire au tournoi'}
                   </button>

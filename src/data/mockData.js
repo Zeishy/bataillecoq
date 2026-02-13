@@ -53,7 +53,7 @@ export const mockTeams = [
     name: "Volcano Warriors",
     logo: "🌋",
     game: "Valorant",
-    members: ["Player1", "Player2", "Player3", "Player4", "Player5"],
+    players: ["Player1", "Player2", "Player3", "Player4", "Player5"],
     points: 2450,
     rank: 1
   },
@@ -62,7 +62,7 @@ export const mockTeams = [
     name: "Ocean Breakers",
     logo: "🌊",
     game: "Valorant",
-    members: ["ProGamer1", "ProGamer2", "ProGamer3", "ProGamer4", "ProGamer5"],
+    players: ["ProGamer1", "ProGamer2", "ProGamer3", "ProGamer4", "ProGamer5"],
     points: 2380,
     rank: 2
   },
@@ -71,7 +71,7 @@ export const mockTeams = [
     name: "Tropical Tigers",
     logo: "🐅",
     game: "League of Legends",
-    members: ["Tiger1", "Tiger2", "Tiger3", "Tiger4", "Tiger5"],
+    players: ["Tiger1", "Tiger2", "Tiger3", "Tiger4", "Tiger5"],
     points: 2200,
     rank: 3
   },
@@ -80,7 +80,7 @@ export const mockTeams = [
     name: "Reunion Legends",
     logo: "⚡",
     game: "Call of Duty",
-    members: ["Legend1", "Legend2", "Legend3", "Legend4"],
+    players: ["Legend1", "Legend2", "Legend3", "Legend4"],
     points: 2100,
     rank: 4
   },
@@ -89,7 +89,7 @@ export const mockTeams = [
     name: "Island Ninjas",
     logo: "🥷",
     game: "Valorant",
-    members: ["Ninja1", "Ninja2", "Ninja3", "Ninja4", "Ninja5"],
+    players: ["Ninja1", "Ninja2", "Ninja3", "Ninja4", "Ninja5"],
     points: 1950,
     rank: 5
   }

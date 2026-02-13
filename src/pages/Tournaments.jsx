@@ -8,7 +8,7 @@ import TournamentDetailModal from '../components/TournamentDetailModal';
 import toast from 'react-hot-toast';
 
 const Tournaments = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [tournaments, setTournaments] = useState([]);
   const [selectedGame, setSelectedGame] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -83,6 +83,81 @@ const Tournaments = () => {
         {labels[status]}
       </span>
     );
+  };
+
+  // Vérifier si l'utilisateur a une équipe inscrite dans le tournoi
+  const getUserTeamRegistrationStatus = (tournament) => {
+    if (!user || !tournament.registeredTeams) return null;
+    
+    // Trouver une équipe inscrite où l'utilisateur est capitaine
+    const userRegistration = tournament.registeredTeams.find(rt => {
+      const team = rt.teamId || rt.team || rt;
+      const captainId = team.captainId?._id || team.captainId;
+      return captainId?.toString() === user._id?.toString();
+    });
+
+    if (!userRegistration) return null;
+
+    return {
+      status: userRegistration.status || 'registered', // Par défaut registered
+      team: userRegistration.teamId || userRegistration.team || userRegistration
+    };
+  };
+
+  // Obtenir le bouton d'action approprié
+  const getActionButton = (tournament) => {
+    const registration = getUserTeamRegistrationStatus(tournament);
+    
+    // Si une équipe de l'utilisateur est inscrite
+    if (registration) {
+      // 'confirmed' ou 'registered' = inscrit
+      if (registration.status === 'confirmed' || registration.status === 'registered') {
+        return {
+          text: '✓ Inscrit',
+          className: 'bg-reunion-green/20 text-reunion-green border-2 border-reunion-green/50 cursor-default',
+          disabled: true
+        };
+      } 
+      // 'eliminated' = éliminé
+      else if (registration.status === 'eliminated') {
+        return {
+          text: '❌ Éliminé',
+          className: 'bg-red-500/20 text-red-400 border-2 border-red-500/50 cursor-default',
+          disabled: true
+        };
+      }
+      // 'withdrawn' = retiré
+      else if (registration.status === 'withdrawn') {
+        return {
+          text: '🚫 Retiré',
+          className: 'bg-gray-500/20 text-gray-400 border-2 border-gray-500/50 cursor-default',
+          disabled: true
+        };
+      }
+    }
+    
+    // Sinon, afficher le bouton normal selon le statut du tournoi
+    if (tournament.status === 'upcoming') {
+      return {
+        text: "S'inscrire",
+        className: 'bg-reunion-red hover:bg-reunion-red/80 text-white',
+        disabled: false,
+        onClick: () => handleRegister(tournament)
+      };
+    } else if (tournament.status === 'ongoing') {
+      return {
+        text: 'Voir détails',
+        className: 'bg-reunion-green hover:bg-reunion-green/80 text-white',
+        disabled: false,
+        onClick: () => setSelectedTournament(tournament)
+      };
+    } else {
+      return {
+        text: 'Terminé',
+        className: 'bg-dark-700 text-gray-500 cursor-not-allowed',
+        disabled: true
+      };
+    }
   };
 
   return (
@@ -215,26 +290,23 @@ const Tournaments = () => {
                   </div>
                 </div>
                 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (tournament.status === 'upcoming') {
-                      handleRegister(tournament);
-                    }
-                  }}
-                  className={`w-full py-2 rounded-lg font-bold transition-colors ${
-                    tournament.status === 'upcoming'
-                      ? 'bg-reunion-red hover:bg-reunion-red/80 text-white'
-                      : tournament.status === 'ongoing'
-                      ? 'bg-reunion-green hover:bg-reunion-green/80 text-white'
-                      : 'bg-dark-700 text-gray-500 cursor-not-allowed'
-                  }`}
-                  disabled={tournament.status === 'completed'}
-                >
-                  {tournament.status === 'upcoming' ? "S'inscrire" : 
-                   tournament.status === 'ongoing' ? 'Voir détails' : 
-                   'Terminé'}
-                </button>
+                {(() => {
+                  const actionButton = getActionButton(tournament);
+                  return (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!actionButton.disabled && actionButton.onClick) {
+                          actionButton.onClick();
+                        }
+                      }}
+                      className={`w-full py-2 rounded-lg font-bold transition-colors ${actionButton.className}`}
+                      disabled={actionButton.disabled}
+                    >
+                      {actionButton.text}
+                    </button>
+                  );
+                })()}
               </div>
             </motion.div>
           ))}

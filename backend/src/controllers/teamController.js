@@ -1,6 +1,8 @@
 import Team from '../models/Team.js';
 import User from '../models/User.js';
 import Player from '../models/Player.js';
+import TeamInvitation from '../models/TeamInvitation.model.js';
+import Notification from '../models/Notification.model.js';
 
 // @desc    Get all teams
 // @route   GET /api/teams
@@ -496,6 +498,10 @@ export const joinTeam = async (req, res) => {
 // @access  Private (Captain only)
 export const removePlayer = async (req, res) => {
   try {
+    console.log('=== REMOVE PLAYER REQUEST ===');
+    console.log('Team ID:', req.params.id);
+    console.log('Player/User ID to remove:', req.params.playerId);
+    
     const team = await Team.findById(req.params.id);
 
     if (!team) {
@@ -505,8 +511,26 @@ export const removePlayer = async (req, res) => {
       });
     }
 
-    // Use team method
-    await team.removePlayer(req.params.playerId);
+    console.log('Team found:', team.name);
+    console.log('Team players before removal:', team.players);
+
+    // Find the Player document by userId to get the playerId
+    const playerToRemove = await Player.findOne({ userId: req.params.playerId });
+    console.log('Player to remove found:', playerToRemove?._id);
+    
+    if (!playerToRemove) {
+      return res.status(404).json({
+        success: false,
+        message: 'Player not found'
+      });
+    }
+
+    // Remove player using the playerId
+    team.players = team.players.filter(p => 
+      p.playerId.toString() !== playerToRemove._id.toString()
+    );
+    await team.save();
+    console.log('Team players after removal:', team.players);
 
     // Update user
     const user = await User.findById(req.params.playerId);
@@ -519,7 +543,9 @@ export const removePlayer = async (req, res) => {
     const player = await Player.findOne({ userId: req.params.playerId });
     if (player) {
       player.games.forEach(game => {
-        game.teams = game.teams.filter(t => !t.teamId.equals(team._id));
+        if (game.teams && Array.isArray(game.teams)) {
+          game.teams = game.teams.filter(t => !t.teamId.equals(team._id));
+        }
       });
       await player.save();
     }
@@ -533,7 +559,208 @@ export const removePlayer = async (req, res) => {
       team: populatedTeam
     });
   } catch (error) {
+    console.error('❌ ERROR in removePlayer:', error.message);
+    console.error('Error stack:', error.stack);
     res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Invite a user to join team
+// @route   POST /api/teams/:id/invite
+// @access  Private (Team captain or member)
+export const invitePlayer = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const teamId = req.params.id;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: 'Team not found'
+      });
+    }
+
+    // Check if already a member
+    const isAlreadyMember = team.members.some(
+      member => member.toString() === userId
+    );
+    if (isAlreadyMember) {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already a member of this team'
+      });
+    }
+
+    // Check for existing pending invitation
+    const existingInvitation = await TeamInvitation.findOne({
+      team: teamId,
+      invitedUser: userId,
+      status: 'pending'
+    });
+
+    if (existingInvitation) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invitation already sent to this user'
+      });
+    }
+
+    // Create invitation
+    const invitation = await TeamInvitation.create({
+      team: teamId,
+      invitedUser: userId,
+      invitedBy: req.user._id
+    });
+
+    // Send notification
+    await Notification.createNotification({
+      recipient: userId,
+      type: 'team_invitation',
+      title: 'Nouvelle invitation d\'équipe',
+      message: `Vous avez été invité à rejoindre l'équipe ${team.name}`,
+      relatedTeam: teamId,
+      actionUrl: `/teams/${teamId}`
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Invitation sent successfully',
+      invitation
+    });
+  } catch (error) {
+    console.error('Invite player error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Get pending invitations for current user
+// @route   GET /api/teams/invitations/pending
+// @access  Private
+export const getPendingInvitations = async (req, res) => {
+  try {
+    const invitations = await TeamInvitation.find({
+      invitedUser: req.user._id,
+      status: 'pending',
+      expiresAt: { $gt: new Date() }
+    })
+      .populate('team', 'name game logo')
+      .populate('invitedBy', 'username')
+      .sort('-createdAt');
+
+    res.status(200).json({
+      success: true,
+      invitations
+    });
+  } catch (error) {
+    console.error('Get invitations error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Accept team invitation
+// @route   POST /api/teams/invitations/:id/accept
+// @access  Private
+export const acceptInvitation = async (req, res) => {
+  try {
+    const invitation = await TeamInvitation.findOne({
+      _id: req.params.id,
+      invitedUser: req.user._id,
+      status: 'pending'
+    }).populate('team');
+
+    if (!invitation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found or already processed'
+      });
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invitation has expired'
+      });
+    }
+
+    const team = await Team.findById(invitation.team._id);
+    
+    // Check team capacity
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({
+        success: false,
+        message: 'Team is full'
+      });
+    }
+
+    // Add user to team
+    team.members.push(req.user._id);
+    await team.save();
+
+    // Update invitation status
+    invitation.status = 'accepted';
+    await invitation.save();
+
+    // Notify team members
+    await Notification.notifyTeamMembers(team._id, {
+      type: 'team_member_joined',
+      title: 'Nouveau membre',
+      message: `${req.user.username} a rejoint l'équipe ${team.name}`,
+      relatedTeam: team._id
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Invitation accepted',
+      team
+    });
+  } catch (error) {
+    console.error('Accept invitation error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Reject team invitation
+// @route   POST /api/teams/invitations/:id/reject
+// @access  Private
+export const rejectInvitation = async (req, res) => {
+  try {
+    const invitation = await TeamInvitation.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        invitedUser: req.user._id,
+        status: 'pending'
+      },
+      { status: 'rejected' },
+      { new: true }
+    );
+
+    if (!invitation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found or already processed'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Invitation rejected'
+    });
+  } catch (error) {
+    console.error('Reject invitation error:', error);
+    res.status(500).json({
       success: false,
       message: error.message
     });
@@ -549,5 +776,10 @@ export default {
   addPlayer,
   joinTeam,
   removePlayer,
-  joinTeam
+  joinTeam,
+  invitePlayer,
+  getPendingInvitations,
+  acceptInvitation,
+  rejectInvitation
 };
+

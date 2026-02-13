@@ -97,7 +97,12 @@ teamSchema.methods.addPlayer = function(playerId, userId, role, game) {
 
 // Method to remove player
 teamSchema.methods.removePlayer = function(userId) {
-  this.players = this.players.filter(p => p.userId.toString() !== userId.toString());
+  this.players = this.players.filter(p => {
+    // Handle both userId and playerId.userId cases
+    const playerUserId = p.userId || p.playerId?.userId;
+    if (!playerUserId) return true; // Keep if no userId found
+    return playerUserId.toString() !== userId.toString();
+  });
 };
 
 // Method to update stats

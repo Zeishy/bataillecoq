@@ -1,10 +1,12 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import authService from '../services/authService';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
@@ -45,6 +47,15 @@ export const AuthProvider = ({ children }) => {
       setUser(newUser);
       setIsAuthenticated(true);
       
+      // Rafraîchir le profil complet pour obtenir toutes les données populées
+      try {
+        const fullUserData = await authService.getMe();
+        setUser(fullUserData.user);
+        localStorage.setItem('user', JSON.stringify(fullUserData.user));
+      } catch (error) {
+        console.error('Erreur lors du rafraîchissement du profil:', error);
+      }
+      
       toast.success(`Bienvenue ${newUser.username} ! 🎉`);
       return data;
     } catch (error) {
@@ -66,6 +77,15 @@ export const AuthProvider = ({ children }) => {
       setUser(newUser);
       setIsAuthenticated(true);
       
+      // Rafraîchir le profil complet pour obtenir toutes les données populées
+      try {
+        const fullUserData = await authService.getMe();
+        setUser(fullUserData.user);
+        localStorage.setItem('user', JSON.stringify(fullUserData.user));
+      } catch (error) {
+        console.error('Erreur lors du rafraîchissement du profil:', error);
+      }
+      
       toast.success(`Content de vous revoir ${newUser.username} ! 👋`);
       return data;
     } catch (error) {
@@ -82,6 +102,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setIsAuthenticated(false);
     toast.success('Déconnexion réussie');
+    navigate('/login');
   };
 
   // Rafraîchir le profil
