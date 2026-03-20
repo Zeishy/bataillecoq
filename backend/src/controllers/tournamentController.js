@@ -2,6 +2,10 @@ import Tournament from '../models/Tournament.js';
 import Team from '../models/Team.js';
 import Match from '../models/Match.js';
 import Notification from '../models/Notification.model.js';
+import Ladder from '../models/Ladder.js';
+import User from '../models/User.js';
+import Player from '../models/Player.js';
+import { addPointsToLadder } from './ladderController.js';
 
 // @desc    Get all tournaments
 // @route   GET /api/tournaments
@@ -48,7 +52,24 @@ export const getTournaments = async (req, res) => {
 export const getTournament = async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id)
-      .populate('registeredTeams.teamId', 'name logo stats')
+      .populate({
+        path: 'registeredTeams.teamId',
+        select: 'name logo stats players captainId',
+        populate: [
+          {
+            path: 'players.playerId',
+            select: 'username inGameName'
+          },
+          {
+            path: 'players.userId',
+            select: 'username email'
+          },
+          {
+            path: 'captainId',
+            select: '_id username'
+          }
+        ]
+      })
       .populate('winner', 'name logo')
       .populate('standings.teamId', 'name logo')
       .populate({
@@ -92,8 +113,26 @@ export const createTournament = async (req, res) => {
       maxTeams,
       prizePool,
       rules,
-      format
+      format,
+      mapPoolId,
+      matchFormat,
+      finalFormat
     } = req.body;
+
+    console.log('Creating tournament with:', {
+      name,
+      game,
+      description,
+      startDate,
+      endDate,
+      maxTeams,
+      prizePool,
+      rules,
+      format,
+      mapPoolId,
+      matchFormat,
+      finalFormat
+    });
 
     const tournament = await Tournament.create({
       name,
@@ -104,7 +143,10 @@ export const createTournament = async (req, res) => {
       maxTeams,
       prizePool,
       rules,
-      format
+      format,
+      mapPoolId: mapPoolId || null,
+      matchFormat: matchFormat || 'bo3',
+      finalFormat: finalFormat || 'bo5'
     });
 
     res.status(201).json({
@@ -112,9 +154,11 @@ export const createTournament = async (req, res) => {
       tournament
     });
   } catch (error) {
+    console.error('Tournament creation error:', error);
     res.status(400).json({
       success: false,
-      message: error.message
+      message: error.message,
+      details: error.errors ? Object.keys(error.errors).map(k => error.errors[k].message) : []
     });
   }
 };
@@ -132,7 +176,10 @@ export const updateTournament = async (req, res) => {
       maxTeams,
       prizePool,
       rules,
-      format
+      format,
+      mapPoolId,
+      matchFormat,
+      finalFormat
     } = req.body;
 
     const tournament = await Tournament.findById(req.params.id);
@@ -152,6 +199,9 @@ export const updateTournament = async (req, res) => {
     if (prizePool !== undefined) tournament.prizePool = prizePool;
     if (rules) tournament.rules = rules;
     if (format) tournament.format = format;
+    if (mapPoolId !== undefined) tournament.mapPoolId = mapPoolId;
+    if (matchFormat) tournament.matchFormat = matchFormat;
+    if (finalFormat) tournament.finalFormat = finalFormat;
 
     await tournament.save();
 
@@ -203,7 +253,7 @@ export const updateStatus = async (req, res) => {
 // @access  Private (Captain only)
 export const registerTeam = async (req, res) => {
   try {
-    const { teamId } = req.body;
+    const { teamId, players, substitutes } = req.body;
 
     const tournament = await Tournament.findById(req.params.id);
 
@@ -214,7 +264,15 @@ export const registerTeam = async (req, res) => {
       });
     }
 
-    const team = await Team.findById(teamId);
+    const team = await Team.findById(teamId)
+      .populate({
+        path: 'players.playerId',
+        select: 'userId inGameName'
+      })
+      .populate({
+        path: 'players.userId',
+        select: 'username email'
+      });
 
     if (!team) {
       return res.status(404).json({
@@ -231,8 +289,59 @@ export const registerTeam = async (req, res) => {
       });
     }
 
-    // Use tournament method
-    await tournament.registerTeam(teamId);
+    // Configuration du nombre de joueurs requis par jeu
+    const GAME_PLAYER_REQUIREMENTS = {
+      'valorant': 5,
+      'callofduty': 5,
+      'leagueoflegends': 5,
+      'rocketleague': 3
+    };
+
+    // Validation de la sélection de joueurs si fournie
+    if (players && Array.isArray(players)) {
+      const requiredPlayers = GAME_PLAYER_REQUIREMENTS[tournament.game];
+      
+      if (!requiredPlayers) {
+        return res.status(400).json({
+          success: false,
+          message: 'Configuration du jeu non trouvée'
+        });
+      }
+
+      // Vérifier le nombre de joueurs titulaires
+      if (players.length !== requiredPlayers) {
+        return res.status(400).json({
+          success: false,
+          message: `Vous devez sélectionner exactement ${requiredPlayers} joueurs titulaires pour ${tournament.game}`
+        });
+      }
+
+      // Vérifier le nombre de remplaçants (max 2)
+      if (substitutes && substitutes.length > 2) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum 2 remplaçants autorisés'
+        });
+      }
+
+      // Vérifier que tous les joueurs appartiennent à l'équipe
+      const teamPlayerIds = team.players.map(p => 
+        (p.playerId?._id || p.playerId?.userId?._id || p.userId?._id || p._id).toString()
+      );
+      
+      const allSelectedPlayers = [...players, ...(substitutes || [])];
+      const invalidPlayers = allSelectedPlayers.filter(pid => !teamPlayerIds.includes(pid.toString()));
+      
+      if (invalidPlayers.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Certains joueurs sélectionnés n\'appartiennent pas à cette équipe'
+        });
+      }
+    }
+
+    // Use tournament method with player selection
+    await tournament.registerTeam(teamId, players, substitutes);
     await tournament.save(); // Save the changes
 
     // Send notification to team members about pending approval
@@ -452,18 +561,50 @@ export const getMatches = async (req, res) => {
   try {
     const matches = await Match.find({ tournamentId: req.params.id })
       .populate({
+        path: 'tournamentId',
+        select: 'name game format mapPoolId matchFormat'
+      })
+      .populate({
         path: 'team1.teamId',
-        select: 'name logo'
+        select: 'name logo captainId players',
+        populate: [
+          {
+            path: 'captainId',
+            select: '_id username email'
+          },
+          {
+            path: 'players.playerId',
+            select: '_id userId',
+            populate: {
+              path: 'userId',
+              select: '_id username email'
+            }
+          }
+        ]
       })
       .populate({
         path: 'team2.teamId',
-        select: 'name logo'
+        select: 'name logo captainId players',
+        populate: [
+          {
+            path: 'captainId',
+            select: '_id username email'
+          },
+          {
+            path: 'players.playerId',
+            select: '_id userId',
+            populate: {
+              path: 'userId',
+              select: '_id username email'
+            }
+          }
+        ]
       })
       .populate({
         path: 'winner',
         select: 'name logo'
       })
-      .sort('round scheduledAt');
+      .sort('round scheduledDate');
 
     res.status(200).json({
       success: true,
@@ -1100,7 +1241,15 @@ export const startTournament = async (req, res) => {
 // @access  Private (Admin/Creator only)
 export const endTournament = async (req, res) => {
   try {
-    const tournament = await Tournament.findById(req.params.id);
+    const tournament = await Tournament.findById(req.params.id)
+      .populate({
+        path: 'registeredTeams.teamId',
+        select: 'name captainId players'
+      })
+      .populate({
+        path: 'winner',
+        select: '_id name'
+      });
 
     if (!tournament) {
       return res.status(404).json({
@@ -1138,6 +1287,49 @@ export const endTournament = async (req, res) => {
     }
 
     await tournament.save();
+
+    // Update ladder with tournament winner points (10 points per win)
+    if (tournament.winner) {
+      try {
+        const winningTeam = await Team.findById(tournament.winner._id)
+          .populate('players.userId', '_id username')
+          .populate({
+            path: 'players.playerId',
+            select: 'userId',
+            populate: {
+              path: 'userId',
+              select: '_id username'
+            }
+          });
+
+        if (winningTeam && winningTeam.players && winningTeam.players.length > 0) {
+          // Award 10 points to all players in the winning team
+          for (const player of winningTeam.players) {
+            let userId = null;
+
+            // Multi-level userId resolution (same pattern as fix script)
+            if (player.userId && player.userId._id) {
+              userId = player.userId._id;
+            } else if (player.playerId && player.playerId.userId) {
+              userId = player.playerId.userId;
+            } else if (player.playerId) {
+              const playerDoc = await Player.findById(player.playerId)
+                .populate('userId', '_id username');
+              if (playerDoc && playerDoc.userId) {
+                userId = playerDoc.userId._id;
+              }
+            }
+
+            if (userId) {
+              await addPointsToLadder(userId, 10, `Tournament ${tournament.name} - Victory`);
+            }
+          }
+        }
+      } catch (ladderError) {
+        console.error('Error updating ladder:', ladderError);
+        // Don't fail the tournament completion if ladder update fails
+      }
+    }
 
     // Notify all participants of tournament completion
     await Notification.notifyTournamentParticipants(tournament._id, {

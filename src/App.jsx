@@ -12,6 +12,7 @@ import Rankings from './pages/Rankings';
 import PersonalStats from './pages/PersonalStats';
 import AdminTournaments from './pages/AdminTournaments';
 import AdminTournamentDetail from './pages/AdminTournamentDetail';
+import MatchDetail from './pages/MatchDetail';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -30,6 +31,7 @@ function App() {
             <Route path="/tournaments" element={<Tournaments />} />
             <Route path="/teams" element={<Teams />} />
             <Route path="/rankings" element={<Rankings />} />
+            <Route path="/matches/:matchId" element={<MatchDetail />} />
             
             {/* Routes protégées */}
             <Route

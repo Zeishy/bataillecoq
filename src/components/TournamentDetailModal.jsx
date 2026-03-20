@@ -12,24 +12,67 @@ import {
   Award,
   Clock,
   TrendingUp,
-  Target
+  Target,
+  UserCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import tournamentService from '../services/tournamentService';
 import TournamentBracket from './TournamentBracket';
+import SelectMatchPlayersModal from './SelectMatchPlayersModal';
+import TournamentMatches from './TournamentMatches';
+import { useAuth } from '../context/AuthContext';
 
 export default function TournamentDetailModal({ isOpen, onClose, tournament, onRegister }) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('info');
   const [bracket, setBracket] = useState(null);
   const [matches, setMatches] = useState([]);
   const [tournamentData, setTournamentData] = useState(tournament);
+  const [selectedMatchForPlayers, setSelectedMatchForPlayers] = useState(null);
+  const [showPlayerSelectionModal, setShowPlayerSelectionModal] = useState(false);
+  const [userTeamInTournament, setUserTeamInTournament] = useState(null);
+
+  // Debug user
+  useEffect(() => {
+    console.log('TournamentDetailModal - User context:', {
+      userId: user?._id,
+      userEmail: user?.email,
+      isOpen
+    });
+  }, [user, isOpen]);
 
   useEffect(() => {
     if (isOpen && tournament) {
       fetchTournamentData();
     }
   }, [isOpen, tournament]);
+
+  const findUserTeamInTournament = (data) => {
+    if (!user || !data) return;
+    
+    console.log('Finding user team in tournament...');
+    console.log('User ID:', user._id);
+    console.log('Registered teams:', data.registeredTeams);
+    
+    // Trouver l'équipe de l'utilisateur dans ce tournoi
+    const userTeam = data.registeredTeams?.find(rt => {
+      const captainId = rt.teamId?.captainId || rt.captainId;
+      const teamId = rt.teamId?._id || rt.teamId;
+      
+      console.log('Checking team:', {
+        teamName: rt.teamId?.name || rt.name,
+        captainId: captainId?.toString(),
+        userId: user._id?.toString(),
+        isMatch: captainId?.toString() === user._id?.toString()
+      });
+      
+      return captainId?.toString() === user._id?.toString();
+    });
+    
+    console.log('User team found:', userTeam?.teamId?.name || userTeam?.name || 'NONE');
+    setUserTeamInTournament(userTeam || null);
+  };
 
   const fetchTournamentData = async () => {
     try {
@@ -42,6 +85,9 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
         setTournamentData(response.tournament);
         setMatches(response.tournament.matches || []);
         console.log('Tournament standings:', response.tournament.standings);
+        
+        // Find user team with the updated data
+        findUserTeamInTournament(response.tournament);
         
         // Fetch bracket if elimination format
         if (tournament.format === 'single-elimination' || tournament.format === 'double-elimination') {
@@ -58,6 +104,23 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
     } catch (error) {
       console.error('Error fetching tournament data:', error);
     }
+  };
+
+  const handleSelectPlayersForMatch = (match) => {
+    // Ajouter le tournamentId au match pour que SelectMatchPlayersModal puisse l'utiliser
+    const enrichedMatch = {
+      ...match,
+      tournamentId: match.tournamentId || tournament._id,
+      game: tournament.game
+    };
+    setSelectedMatchForPlayers(enrichedMatch);
+    setShowPlayerSelectionModal(true);
+  };
+
+  const handlePlayerSelectionSuccess = () => {
+    // Rafraîchir les données du tournoi
+    fetchTournamentData();
+    setShowPlayerSelectionModal(false);
   };
 
   if (!tournament) return null;
@@ -89,7 +152,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
 
   const getMatchStatusBadge = (status) => {
     const badges = {
-      pending: { text: 'À venir', class: 'bg-blue-500/20 text-blue-400' },
+      pending: { text: 'En attente', class: 'bg-yellow-500/20 text-yellow-400' },
       ongoing: { text: 'En cours', class: 'bg-green-500/20 text-green-400' },
       completed: { text: 'Terminé', class: 'bg-gray-500/20 text-gray-400' },
       cancelled: { text: 'Annulé', class: 'bg-red-500/20 text-red-400' }
@@ -430,91 +493,11 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <Gamepad2 className="w-5 h-5 text-reunion-green" />
                       Matchs du tournoi
                     </h3>
-                    {matches && matches.length > 0 ? (
-                      <div className="space-y-3">
-                        {matches.map((match) => {
-                          const matchStatus = getMatchStatusBadge(match.status);
-                          return (
-                            <div
-                              key={match._id}
-                              className="bg-dark-700 rounded-lg p-4 hover:bg-dark-600 transition-colors"
-                            >
-                              <div className="flex items-center justify-between mb-3">
-                                <span className="text-gray-400 text-sm">Round {match.round}</span>
-                                <span className={`px-2 py-1 rounded text-xs font-bold ${matchStatus.class}`}>
-                                  {matchStatus.text}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3 flex-1">
-                                  {match.team1?.teamId?.logo && (
-                                    <img 
-                                      src={match.team1.teamId.logo} 
-                                      alt={match.team1.teamId.name}
-                                      className="w-8 h-8 rounded object-cover"
-                                    />
-                                  )}
-                                  <div className="text-right flex-1">
-                                    <p className="text-white font-bold">
-                                      {match.team1?.teamId?.name || 'TBD'}
-                                    </p>
-                                  </div>
-                                </div>
-                                
-                                {match.status === 'completed' && (
-                                  <div className="bg-dark-800 px-4 py-2 rounded-lg flex items-center gap-2">
-                                    <span className={`font-bold text-lg ${match.winner?.toString() === match.team1?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
-                                      {match.team1?.score || 0}
-                                    </span>
-                                    <span className="text-gray-500 font-bold">-</span>
-                                    <span className={`font-bold text-lg ${match.winner?.toString() === match.team2?.teamId?._id?.toString() ? 'text-reunion-green' : 'text-gray-400'}`}>
-                                      {match.team2?.score || 0}
-                                    </span>
-                                  </div>
-                                )}
-                                
-                                <div className="flex items-center gap-3 flex-1">
-                                  <div className="flex-1">
-                                    <p className="text-white font-bold">
-                                      {match.team2?.teamId?.name || 'TBD'}
-                                    </p>
-                                  </div>
-                                  {match.team2?.teamId?.logo && (
-                                    <img 
-                                      src={match.team2.teamId.logo} 
-                                      alt={match.team2.teamId.name}
-                                      className="w-8 h-8 rounded object-cover"
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                              {match.scheduledDate && (
-                                <div className="mt-3 pt-3 border-t border-dark-600 flex items-center gap-2 text-xs text-gray-400">
-                                  <Clock className="w-3 h-3" />
-                                  {format(new Date(match.scheduledDate), "dd MMMM yyyy 'à' HH:mm", { locale: fr })}
-                                </div>
-                              )}
-                              {match.status === 'completed' && match.winner && (
-                                <div className="mt-2 flex items-center gap-2 text-xs">
-                                  <Trophy className="w-3 h-3 text-reunion-gold" />
-                                  <span className="text-reunion-green font-bold">
-                                    Vainqueur: {match.winner.toString() === match.team1?.teamId?._id?.toString() 
-                                      ? match.team1.teamId.name 
-                                      : match.team2?.teamId?.name}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <Gamepad2 className="w-16 h-16 text-gray-600 mx-auto mb-3" />
-                        <p className="text-gray-400">Aucun match programmé</p>
-                        <p className="text-gray-500 text-sm mt-1">Les matchs seront créés après les inscriptions</p>
-                      </div>
-                    )}
+                    <TournamentMatches 
+                      tournamentId={tournament._id}
+                      currentUser={user}
+                      canEdit={user?._id && tournament?.organizerId === user._id}
+                    />
                   </div>
                 )}
 
@@ -622,6 +605,20 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
               )}
             </motion.div>
           </div>
+
+          {/* Select Match Players Modal */}
+          {selectedMatchForPlayers && userTeamInTournament && (
+            <SelectMatchPlayersModal
+              isOpen={showPlayerSelectionModal}
+              onClose={() => {
+                setShowPlayerSelectionModal(false);
+                setSelectedMatchForPlayers(null);
+              }}
+              match={selectedMatchForPlayers}
+              teamId={userTeamInTournament.teamId?._id || userTeamInTournament.teamId}
+              onSuccess={handlePlayerSelectionSuccess}
+            />
+          )}
         </>
       )}
     </AnimatePresence>

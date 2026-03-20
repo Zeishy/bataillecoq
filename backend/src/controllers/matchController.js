@@ -106,8 +106,18 @@ export const updateScore = async (req, res) => {
       });
     }
 
-    // Use match method
-    await match.updateScore(team1Score, team2Score);
+    // Update scores for both teams
+    match.team1.score = team1Score;
+    match.team2.score = team2Score;
+    
+    // Determine winner
+    if (team1Score > team2Score) {
+      match.winner = match.team1.teamId;
+    } else if (team2Score > team1Score) {
+      match.winner = match.team2.teamId;
+    }
+    
+    await match.save();
 
     const populatedMatch = await Match.findById(match._id)
       .populate('tournamentId', 'name game format')
@@ -482,11 +492,196 @@ export const updateScoreAndAdvance = async (req, res) => {
   }
 };
 
+// @desc    Select players for a match
+// @route   PUT /api/matches/:id/select-players
+// @access  Private (Team Captain only)
+export const selectPlayersForMatch = async (req, res) => {
+  try {
+    const { teamId, selectedPlayers } = req.body;
+
+    if (!teamId || !selectedPlayers || !Array.isArray(selectedPlayers)) {
+      return res.status(400).json({
+        success: false,
+        message: 'teamId et selectedPlayers sont requis'
+      });
+    }
+
+    const match = await Match.findById(req.params.id)
+      .populate('tournamentId');
+
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        message: 'Match non trouvé'
+      });
+    }
+
+    // Vérifier que l'équipe participe au match
+    const isTeam1 = match.team1.teamId.toString() === teamId.toString();
+    const isTeam2 = match.team2.teamId.toString() === teamId.toString();
+
+    if (!isTeam1 && !isTeam2) {
+      return res.status(403).json({
+        success: false,
+        message: 'Cette équipe ne participe pas à ce match'
+      });
+    }
+
+    // Récupérer le tournoi et l'inscription de l'équipe
+    const tournament = await Tournament.findById(match.tournamentId._id);
+    const teamRegistration = tournament.registeredTeams.find(
+      rt => rt.teamId.toString() === teamId.toString()
+    );
+
+    if (!teamRegistration) {
+      return res.status(404).json({
+        success: false,
+        message: 'Équipe non inscrite au tournoi'
+      });
+    }
+
+    // Récupérer la config du jeu
+    const GAME_PLAYER_REQUIREMENTS = {
+      'valorant': 5,
+      'callofduty': 5,
+      'leagueoflegends': 5,
+      'rocketleague': 3
+    };
+
+    const requiredPlayers = GAME_PLAYER_REQUIREMENTS[tournament.game];
+    if (!requiredPlayers) {
+      return res.status(400).json({
+        success: false,
+        message: 'Configuration du jeu non trouvée'
+      });
+    }
+
+    // Valider le nombre de joueurs
+    if (selectedPlayers.length !== requiredPlayers) {
+      return res.status(400).json({
+        success: false,
+        message: `Vous devez sélectionner exactement ${requiredPlayers} joueurs pour ce match`
+      });
+    }
+
+    // Vérifier que tous les joueurs sélectionnés sont dans la liste des joueurs inscrits (titulaires + remplaçants)
+    const allowedPlayers = [
+      ...teamRegistration.players.map(p => p.toString()),
+      ...teamRegistration.substitutes.map(s => s.toString())
+    ];
+
+    const invalidPlayers = selectedPlayers.filter(
+      pid => !allowedPlayers.includes(pid.toString())
+    );
+
+    if (invalidPlayers.length > 0) {
+      console.error('DEBUG selectPlayersForMatch:');
+      console.error('Selected IDs from frontend:', selectedPlayers);
+      console.error('Allowed IDs from tournament:', allowedPlayers);
+      console.error('Invalid IDs:', invalidPlayers);
+      console.error('Sample allowed player:', teamRegistration.players[0]);
+      
+      return res.status(400).json({
+        success: false,
+        message: 'Certains joueurs sélectionnés ne font pas partie de l\'inscription au tournoi',
+        debug: {
+          selectedCount: selectedPlayers.length,
+          allowedCount: allowedPlayers.length,
+          invalidCount: invalidPlayers.length
+        }
+      });
+    }
+
+    // Vérifier que le match n'est pas déjà terminé
+    if (match.status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Impossible de modifier les joueurs d\'un match terminé'
+      });
+    }
+
+    // Mettre à jour les joueurs sélectionnés
+    if (isTeam1) {
+      match.team1.selectedPlayers = selectedPlayers;
+    } else {
+      match.team2.selectedPlayers = selectedPlayers;
+    }
+
+    // Vérifier si les 2 équipes ont maintenant sélectionné leurs joueurs
+    const team1HasSelected = isTeam1 
+      ? selectedPlayers.length > 0 
+      : (match.team1.selectedPlayers && match.team1.selectedPlayers.length > 0);
+    
+    const team2HasSelected = isTeam2 
+      ? selectedPlayers.length > 0 
+      : (match.team2.selectedPlayers && match.team2.selectedPlayers.length > 0);
+
+    // Si les 2 équipes ont sélectionné, passer le match à "ongoing"
+    if (team1HasSelected && team2HasSelected && match.status === 'pending') {
+      match.status = 'ongoing';
+    }
+
+    await match.save();
+
+    const populatedMatch = await Match.findById(match._id)
+      .populate('tournamentId', 'name game')
+      .populate('team1.teamId team2.teamId', 'name logo')
+      .populate('team1.selectedPlayers team2.selectedPlayers', 'username avatar');
+
+    res.status(200).json({
+      success: true,
+      message: team1HasSelected && team2HasSelected 
+        ? 'Joueurs sélectionnés avec succès! Le match passe maintenant en cours.'
+        : 'Joueurs sélectionnés avec succès. En attente de l\'autre équipe...',
+      match: populatedMatch
+    });
+  } catch (error) {
+    console.error('Error selecting players:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Get all matches for a tournament
+// @route   GET /api/tournaments/:tournamentId/matches
+// @access  Public
+export const getTournamentMatches = async (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+
+    const matches = await Match.find({ tournamentId })
+      .populate('tournamentId', 'name game format mapPoolId matchFormat')
+      .populate('team1Id', 'name captainId players')
+      .populate('team2Id', 'name captainId players')
+      .populate('team1Id.captainId', '_id username')
+      .populate('team2Id.captainId', '_id username')
+      .populate('team1Id.players', '_id username role')
+      .populate('team2Id.players', '_id username role')
+      .populate('selectedPlayers', '_id username')
+      .sort({ round: 1, createdAt: 1 });
+
+    res.status(200).json({
+      success: true,
+      matches
+    });
+  } catch (error) {
+    console.error('Error getting tournament matches:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 export default {
   getMatch,
   createMatch,
   updateScore,
   completeMatch,
   deleteMatch,
-  updateScoreAndAdvance
+  updateScoreAndAdvance,
+  selectPlayersForMatch,
+  getTournamentMatches
 };

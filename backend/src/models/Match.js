@@ -20,7 +20,10 @@ const matchSchema = new mongoose.Schema({
     score: {
       type: Number,
       default: 0
-    }
+    },
+    selectedPlayers: [{
+      type: mongoose.Schema.Types.ObjectId
+    }]
   },
   team2: {
     teamId: {
@@ -31,13 +34,50 @@ const matchSchema = new mongoose.Schema({
     score: {
       type: Number,
       default: 0
-    }
+    },
+    selectedPlayers: [{
+      type: mongoose.Schema.Types.ObjectId
+    }]
   },
   scheduledDate: Date,
   status: {
     type: String,
     enum: ['pending', 'ongoing', 'completed', 'cancelled'],
     default: 'pending'
+  },
+  // Pick and Ban System
+  mapPoolId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'MapPool',
+    default: null
+  },
+  matchFormat: {
+    type: String,
+    enum: ['bo1', 'bo3', 'bo5', 'bo7', 'bo9'],
+    default: 'bo3'
+  },
+  pickAndBan: {
+    status: {
+      type: String,
+      enum: ['not-started', 'in-progress', 'completed'],
+      default: 'not-started'
+    },
+    selectedMaps: [{
+      mode: String,               // For multi-mode: "HP", "SND", "Surcharge"
+      mapName: String,
+      pickedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Team'
+      }
+    }],
+    bannedMaps: [{
+      mapName: String,
+      bannedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Team'
+      }
+    }],
+    completedAt: Date
   },
   winner: {
     type: mongoose.Schema.Types.ObjectId,

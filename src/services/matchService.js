@@ -7,6 +7,12 @@ export const matchService = {
     return response.data;
   },
 
+  // Get all matches for a tournament
+  getTournamentMatches: async (tournamentId) => {
+    const response = await api.get(`/tournaments/${tournamentId}/matches`);
+    return response.data;
+  },
+
   // Update match score only
   updateScore: async (matchId, team1Score, team2Score) => {
     const response = await api.put(`/matches/${matchId}/score`, {
@@ -33,6 +39,15 @@ export const matchService = {
   // Delete match
   deleteMatch: async (matchId) => {
     const response = await api.delete(`/matches/${matchId}`);
+    return response.data;
+  },
+
+  // Select players for a match
+  selectPlayers: async (matchId, teamId, selectedPlayers) => {
+    const response = await api.put(`/matches/${matchId}/select-players`, {
+      teamId,
+      selectedPlayers
+    });
     return response.data;
   }
 };

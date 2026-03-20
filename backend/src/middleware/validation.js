@@ -46,8 +46,9 @@ export const createTeamValidation = [
     .isLength({ min: 3, max: 50 })
     .withMessage('Team name must be between 3 and 50 characters'),
   body('game')
-    .isIn(['valorant', 'lol', 'csgo', 'overwatch', 'rocket-league'])
-    .withMessage('Invalid game'),
+    .trim()
+    .notEmpty()
+    .withMessage('Game is required'),
   body('description')
     .optional()
     .isLength({ max: 500 })
@@ -61,8 +62,9 @@ export const createTournamentValidation = [
     .notEmpty()
     .withMessage('Tournament name is required'),
   body('game')
-    .isIn(['valorant', 'lol', 'csgo', 'overwatch', 'rocket-league'])
-    .withMessage('Invalid game'),
+    .trim()
+    .notEmpty()
+    .withMessage('Game is required'),
   body('prizePool')
     .notEmpty()
     .withMessage('Prize pool is required'),

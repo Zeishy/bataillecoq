@@ -21,11 +21,15 @@ export const getTeams = async (req, res) => {
       .populate('captainId', 'username avatar')
       .populate({
         path: 'players.playerId',
-        select: 'userId games',
+        select: 'userId games inGameName',
         populate: {
           path: 'userId',
-          select: 'username avatar'
+          select: 'username avatar email'
         }
+      })
+      .populate({
+        path: 'players.userId',
+        select: 'username avatar email'
       });
 
     // Sort

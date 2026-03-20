@@ -47,6 +47,10 @@ import playerRoutes from './routes/players.js';
 import matchRoutes from './routes/matches.js';
 import notificationRoutes from './routes/notification.routes.js';
 import messageRoutes from './routes/message.routes.js';
+import gameRoutes from './routes/games.js';
+import mapPoolRoutes from './routes/map-pools.js';
+import pickAndBanRoutes from './routes/pick-and-ban.js';
+import ladderRoutes from './routes/ladder.routes.js';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamRoutes);
@@ -55,6 +59,10 @@ app.use('/api/players', playerRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/games', gameRoutes);
+app.use('/api/map-pools', mapPoolRoutes);
+app.use('/api/pick-and-ban', pickAndBanRoutes);
+app.use('/api/ladder', ladderRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

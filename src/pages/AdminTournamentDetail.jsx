@@ -22,6 +22,7 @@ import tournamentService from '../services/tournamentService';
 import matchService from '../services/matchService';
 import TournamentBracket from '../components/TournamentBracket';
 import MatchScoreModal from '../components/MatchScoreModal';
+import SelectMatchPlayersModal from '../components/SelectMatchPlayersModal';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 

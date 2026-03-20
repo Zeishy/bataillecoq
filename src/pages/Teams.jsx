@@ -24,7 +24,6 @@ const Teams = () => {
     'all': 'Tous les jeux',
     'valorant': 'Valorant',
     'lol': 'League of Legends',
-    'csgo': 'CS:GO',
     'overwatch': 'Overwatch',
     'rocket-league': 'Rocket League'
   };

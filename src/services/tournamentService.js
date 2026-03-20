@@ -40,8 +40,13 @@ export const tournamentService = {
   },
 
   // Inscrire une équipe au tournoi
-  registerTeam: async (tournamentId, teamId) => {
-    const response = await api.post(`/tournaments/${tournamentId}/register`, { teamId });
+  registerTeam: async (tournamentId, teamId, playerSelection = null) => {
+    const payload = { teamId };
+    if (playerSelection) {
+      payload.players = playerSelection.players;
+      payload.substitutes = playerSelection.substitutes;
+    }
+    const response = await api.post(`/tournaments/${tournamentId}/register`, payload);
     return response.data;
   },
 

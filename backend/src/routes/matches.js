@@ -5,7 +5,8 @@ import {
   updateScore,
   completeMatch,
   deleteMatch,
-  updateScoreAndAdvance
+  updateScoreAndAdvance,
+  selectPlayersForMatch
 } from '../controllers/matchController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { validateObjectId, validate } from '../middleware/validation.js';
@@ -16,6 +17,7 @@ router.get('/:id', validateObjectId('id'), validate, getMatch);
 router.post('/', protect, authorize('admin'), createMatch);
 router.put('/:id/score', protect, authorize('admin'), validateObjectId('id'), validate, updateScore);
 router.put('/:id/score-and-advance', protect, authorize('admin'), validateObjectId('id'), validate, updateScoreAndAdvance);
+router.put('/:id/select-players', protect, validateObjectId('id'), validate, selectPlayersForMatch);
 router.put('/:id/complete', protect, authorize('admin'), validateObjectId('id'), validate, completeMatch);
 router.delete('/:id', protect, authorize('admin'), validateObjectId('id'), validate, deleteMatch);
 

@@ -1,18 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Edit, Trash2, Calendar, Trophy, Users, DollarSign, Save, X, Eye } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, Trophy, Users, DollarSign, Save, X, Eye, Gamepad2, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import tournamentService from '../services/tournamentService';
+import gameService from '../services/gameService';
+import { getMapPoolsByGame } from '../services/mapPoolService';
+import GamesManagement from '../components/GamesManagement';
+import PickAndBanModal from '../components/PickAndBanModal';
+import AdminPickAndBanDemo from '../components/AdminPickAndBanDemo';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 const AdminTournaments = () => {
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState([]);
+  const [games, setGames] = useState([]);
+  const [mapPools, setMapPools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showGamesModal, setShowGamesModal] = useState(false);
+  const [showPickAndBanModal, setShowPickAndBanModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null);
+  const [activeTab, setActiveTab] = useState('tournaments');
   const [formData, setFormData] = useState({
     name: '',
     game: '',
@@ -22,16 +32,11 @@ const AdminTournaments = () => {
     maxTeams: 8,
     prizePool: 0,
     rules: '',
-    format: 'single-elimination'
+    format: 'single-elimination',
+    mapPoolId: '',
+    matchFormat: 'bo3',
+    finalFormat: 'bo5'
   });
-
-  const gameOptions = [
-    { value: 'lol', label: 'League of Legends' },
-    { value: 'valorant', label: 'Valorant' },
-    { value: 'csgo', label: 'CS:GO' },
-    { value: 'dota2', label: 'Dota 2' },
-    { value: 'rocket-league', label: 'Rocket League' }
-  ];
 
   const formatOptions = [
     { value: 'single-elimination', label: 'Simple élimination' },
@@ -42,7 +47,18 @@ const AdminTournaments = () => {
 
   useEffect(() => {
     fetchTournaments();
+    fetchGames();
   }, []);
+
+  const fetchGames = async () => {
+    try {
+      const data = await gameService.getAllGames();
+      setGames(data.games || []);
+    } catch (error) {
+      console.error('Error fetching games:', error);
+      toast.error('Erreur lors du chargement des jeux');
+    }
+  };
 
   const fetchTournaments = async () => {
     try {
@@ -55,7 +71,7 @@ const AdminTournaments = () => {
     }
   };
 
-  const handleOpenModal = (tournament = null) => {
+  const handleOpenModal = async (tournament = null) => {
     if (tournament) {
       setEditingTournament(tournament);
       setFormData({
@@ -67,8 +83,22 @@ const AdminTournaments = () => {
         maxTeams: tournament.maxTeams,
         prizePool: tournament.prizePool || 0,
         rules: tournament.rules || '',
-        format: tournament.format
+        format: tournament.format,
+        mapPoolId: tournament.mapPoolId || '',
+        matchFormat: tournament.matchFormat || 'bo3',
+        finalFormat: tournament.finalFormat || 'bo5'
       });
+      
+      // Charger les map pools pour ce jeu
+      if (tournament.game) {
+        try {
+          const pools = await getMapPoolsByGame(tournament.game);
+          setMapPools(pools || []);
+        } catch (error) {
+          console.error('Error loading map pools:', error);
+          setMapPools([]);
+        }
+      }
     } else {
       setEditingTournament(null);
       setFormData({
@@ -80,8 +110,12 @@ const AdminTournaments = () => {
         maxTeams: 8,
         prizePool: 0,
         rules: '',
-        format: 'single-elimination'
+        format: 'single-elimination',
+        mapPoolId: '',
+        matchFormat: 'bo3',
+        finalFormat: 'bo5'
       });
+      setMapPools([]); // Réinitialiser les map pools
     }
     setShowModal(true);
   };
@@ -102,12 +136,28 @@ const AdminTournaments = () => {
     });
   };
 
-  const handleChange = (e) => {
+  const handleChange = async (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: name === 'maxTeams' || name === 'prizePool' ? Number(value) : value
     }));
+
+    // Si on change le jeu, charger les map pools pour ce jeu
+    if (name === 'game' && value) {
+      try {
+        const pools = await getMapPoolsByGame(value);
+        setMapPools(pools || []);
+        // Réinitialiser le mapPoolId quand on change de jeu
+        setFormData(prev => ({
+          ...prev,
+          mapPoolId: ''
+        }));
+      } catch (error) {
+        console.error('Error loading map pools:', error);
+        setMapPools([]);
+      }
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -125,16 +175,35 @@ const AdminTournaments = () => {
     }
 
     try {
+      // Préparer les données pour l'envoi
+      const submitData = {
+        name: formData.name || '',
+        game: formData.game || '',
+        description: formData.description || '',
+        startDate: formData.startDate || '',
+        endDate: formData.endDate || '',
+        maxTeams: formData.maxTeams || 8,
+        prizePool: String(formData.prizePool || '0'),
+        rules: formData.rules || '',
+        format: formData.format || 'single-elimination',
+        mapPoolId: formData.mapPoolId || null,
+        matchFormat: formData.matchFormat || 'bo3',
+        finalFormat: formData.finalFormat || 'bo5'
+      };
+
+      console.log('Submitting tournament data:', submitData);
+
       if (editingTournament) {
-        await tournamentService.updateTournament(editingTournament._id, formData);
+        await tournamentService.updateTournament(editingTournament._id, submitData);
         toast.success('Tournoi mis à jour avec succès !');
       } else {
-        await tournamentService.createTournament(formData);
+        await tournamentService.createTournament(submitData);
         toast.success('Tournoi créé avec succès !');
       }
       handleCloseModal();
       fetchTournaments();
     } catch (error) {
+      console.error('Tournament submission error:', error);
       toast.error(error.response?.data?.message || 'Erreur lors de l\'enregistrement du tournoi');
     }
   };
@@ -188,28 +257,106 @@ const AdminTournaments = () => {
   }
 
   return (
-    <div className="min-h-screen bg-dark-900 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-dark-900 pt-24 pb-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2">Gestion des Tournois</h1>
-            <p className="text-gray-400">Créer et gérer les tournois de la plateforme</p>
+        <div className="mb-12">
+          <div className="text-center mb-10">
+            <h1 className="text-4xl font-bold text-white mb-3">Gestion des Tournois</h1>
+            <p className="text-gray-400 text-lg">Créer et gérer les tournois de la plateforme</p>
           </div>
+
+          {/* Action Buttons - Grid Layout */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl mx-auto">
+            {/* Games Management Button */}
+            <motion.button
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setShowGamesModal(true)}
+              className="group relative flex flex-col items-center justify-center gap-3 p-6 bg-gradient-to-br from-purple-600/20 to-purple-900/20 hover:from-purple-600/30 hover:to-purple-900/30 border border-purple-500/30 hover:border-purple-400/60 rounded-xl font-semibold transition-all duration-300"
+              title="Gérer les jeux disponibles"
+            >
+              <div className="p-3 bg-purple-500/20 rounded-lg group-hover:bg-purple-500/30 transition-colors">
+                <Gamepad2 className="w-6 h-6 text-purple-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-white font-bold text-sm">Gestion des Jeux</p>
+                <p className="text-gray-400 text-xs mt-1">Ajouter et modifier</p>
+              </div>
+              <div className="absolute inset-0 bg-purple-500/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur" />
+            </motion.button>
+
+            {/* Pick and Ban Button */}
+            <motion.button
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setShowPickAndBanModal(true)}
+              className="group relative flex flex-col items-center justify-center gap-3 p-6 bg-gradient-to-br from-yellow-600/20 to-yellow-900/20 hover:from-yellow-600/30 hover:to-yellow-900/30 border border-yellow-500/30 hover:border-yellow-400/60 rounded-xl font-semibold transition-all duration-300"
+              title="Gérer les pick and ban"
+            >
+              <div className="p-3 bg-yellow-500/20 rounded-lg group-hover:bg-yellow-500/30 transition-colors">
+                <Zap className="w-6 h-6 text-yellow-400" />
+              </div>
+              <div className="text-center">
+                <p className="text-white font-bold text-sm">Pick & Ban</p>
+                <p className="text-gray-400 text-xs mt-1">Maps et formats</p>
+              </div>
+              <div className="absolute inset-0 bg-yellow-500/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur" />
+            </motion.button>
+
+            {/* Create Tournament Button */}
+            <motion.button
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => handleOpenModal()}
+              className="group relative flex flex-col items-center justify-center gap-3 p-6 bg-gradient-to-br from-reunion-green/20 to-reunion-green/10 hover:from-reunion-green/30 hover:to-reunion-green/20 border border-reunion-green/40 hover:border-reunion-green/70 rounded-xl font-semibold transition-all duration-300"
+            >
+              <div className="p-3 bg-reunion-green/20 rounded-lg group-hover:bg-reunion-green/30 transition-colors">
+                <Plus className="w-6 h-6 text-reunion-green" />
+              </div>
+              <div className="text-center">
+                <p className="text-white font-bold text-sm">Créer un Tournoi</p>
+                <p className="text-gray-400 text-xs mt-1">Nouveau tournoi</p>
+              </div>
+              <div className="absolute inset-0 bg-reunion-green/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur" />
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="flex gap-2 mb-8 border-b border-dark-700">
           <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => handleOpenModal()}
-            className="flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-semibold transition-colors"
+            onClick={() => setActiveTab('tournaments')}
+            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
+              activeTab === 'tournaments'
+                ? 'text-reunion-blue border-reunion-blue'
+                : 'text-gray-400 hover:text-white border-transparent'
+            }`}
+            whileHover={{ y: -2 }}
+            whileTap={{ y: 0 }}
           >
-            <Plus className="w-5 h-5" />
-            Créer un tournoi
+            Gestion des Tournois
+          </motion.button>
+          <motion.button
+            onClick={() => setActiveTab('demo')}
+            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
+              activeTab === 'demo'
+                ? 'text-reunion-blue border-reunion-blue'
+                : 'text-gray-400 hover:text-white border-transparent'
+            }`}
+            whileHover={{ y: -2 }}
+            whileTap={{ y: 0 }}
+          >
+            Démo Pick & Ban
           </motion.button>
         </div>
 
-        {/* Tournaments Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {tournaments.map((tournament) => (
+        {/* Content Area - Conditional Rendering */}
+        {activeTab === 'tournaments' ? (
+          <>
+            {/* Tournaments Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {tournaments.map((tournament) => (
             <motion.div
               key={tournament._id}
               initial={{ opacity: 0, y: 20 }}
@@ -347,9 +494,9 @@ const AdminTournaments = () => {
                     className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary-500"
                   >
                     <option value="">Sélectionner un jeu</option>
-                    {gameOptions.map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
+                    {games.map(game => (
+                      <option key={game._id} value={game.slug}>
+                        {game.icon && `${game.icon} `}{game.name}
                       </option>
                     ))}
                   </select>
@@ -452,6 +599,70 @@ const AdminTournaments = () => {
                   </select>
                 </div>
 
+                {/* Pick and Ban Settings */}
+                <div className="border border-dashed border-purple-500/30 rounded-lg p-4 bg-purple-500/10">
+                  <h3 className="text-lg font-bold text-purple-400 mb-4">⚡ Paramètres Pick & Ban</h3>
+                  
+                  {/* Map Pool */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Map Pool
+                    </label>
+                    <select
+                      name="mapPoolId"
+                      value={formData.mapPoolId}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary-500"
+                    >
+                      <option value="">-- Pas de Pick & Ban --</option>
+                      {mapPools.map(pool => (
+                        <option key={pool._id} value={pool._id}>
+                          {pool.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">Optionnel - Si non défini, pas de pick & ban</p>
+                  </div>
+
+                  {/* Match Format & Final Format */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Format des matchs
+                      </label>
+                      <select
+                        name="matchFormat"
+                        value={formData.matchFormat}
+                        onChange={handleChange}
+                        className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary-500"
+                      >
+                        <option value="bo1">BO1</option>
+                        <option value="bo3">BO3</option>
+                        <option value="bo5">BO5</option>
+                        <option value="bo7">BO7</option>
+                        <option value="bo9">BO9</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Format de la finale
+                      </label>
+                      <select
+                        name="finalFormat"
+                        value={formData.finalFormat}
+                        onChange={handleChange}
+                        className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary-500"
+                      >
+                        <option value="bo1">BO1</option>
+                        <option value="bo3">BO3</option>
+                        <option value="bo5">BO5</option>
+                        <option value="bo7">BO7</option>
+                        <option value="bo9">BO9</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Rules */}
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -489,6 +700,25 @@ const AdminTournaments = () => {
           </motion.div>
         </div>
       )}
+
+      {/* Games Management Modal */}
+      <GamesManagement 
+        isOpen={showGamesModal} 
+        onClose={() => {
+          setShowGamesModal(false);
+          fetchGames(); // Refresh games after closing
+        }}
+      />
+
+      {/* Pick and Ban Modal */}
+      <PickAndBanModal
+        isOpen={showPickAndBanModal}
+        onClose={() => setShowPickAndBanModal(false)}
+        games={games}
+        onSelectMapPool={(mapPool) => {
+          toast.success(`Map pool "${mapPool.name}" sélectionné`);
+        }}
+      />
     </div>
   );
 };

@@ -8,7 +8,6 @@ const tournamentSchema = new mongoose.Schema({
   },
   game: {
     type: String,
-    enum: ['valorant', 'callofduty', 'leagueoflegends', 'rocketleague'],
     required: true
   },
   description: {
@@ -47,8 +46,24 @@ const tournamentSchema = new mongoose.Schema({
   },
   format: {
     type: String,
-    enum: ['single-elimination', 'double-elimination', 'round-robin'],
+    enum: ['single-elimination', 'double-elimination', 'round-robin', 'swiss'],
     default: 'single-elimination'
+  },
+  // Pick and Ban System
+  mapPoolId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'MapPool',
+    default: null
+  },
+  matchFormat: {
+    type: String,
+    enum: ['bo1', 'bo3', 'bo5', 'bo7', 'bo9'],
+    default: 'bo3'
+  },
+  finalFormat: {
+    type: String,
+    enum: ['bo1', 'bo3', 'bo5', 'bo7', 'bo9'],
+    default: 'bo5'
   },
   registeredTeams: [{
     teamId: {
@@ -63,7 +78,13 @@ const tournamentSchema = new mongoose.Schema({
       type: String,
       enum: ['registered', 'confirmed', 'eliminated', 'withdrawn'],
       default: 'registered'
-    }
+    },
+    players: [{
+      type: mongoose.Schema.Types.ObjectId
+    }],
+    substitutes: [{
+      type: mongoose.Schema.Types.ObjectId
+    }]
   }],
   matches: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -109,7 +130,7 @@ const tournamentSchema = new mongoose.Schema({
 });
 
 // Method to register team
-tournamentSchema.methods.registerTeam = function(teamId) {
+tournamentSchema.methods.registerTeam = function(teamId, players = [], substitutes = []) {
   // Check if already registered
   const exists = this.registeredTeams.some(rt => rt.teamId.toString() === teamId.toString());
   if (exists) {
@@ -126,7 +147,14 @@ tournamentSchema.methods.registerTeam = function(teamId) {
     throw new Error('Registration is closed');
   }
   
-  this.registeredTeams.push({ teamId });
+  // Create registration object
+  const registration = { 
+    teamId,
+    players: players || [],
+    substitutes: substitutes || []
+  };
+  
+  this.registeredTeams.push(registration);
   
   // Initialize standings
   this.standings.push({ teamId, rank: this.registeredTeams.length, points: 0, wins: 0, losses: 0 });
