@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Users, Check } from 'lucide-react';
 import toast from 'react-hot-toast';
 import matchService from '../services/matchService';
+import { useAuth } from '../context/AuthContext';
 
 const PlayerSelectionModal = ({ match, onClose, onSuccess }) => {
+  const { user } = useAuth();
   const [selectedPlayers, setSelectedPlayers] = useState([]);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -21,19 +23,51 @@ const PlayerSelectionModal = ({ match, onClose, onSuccess }) => {
 
   // Déterminer l'équipe du capitaine
   useEffect(() => {
-    if (!match) return;
+    if (!match || !user) return;
     
-    // À déterminer via currentUser - pour maintenant, on prend team1
-    const teamId = match.team1?.teamId?._id || match.team1?.teamId;
-    setSelectedTeamId(teamId);
+    console.log('📋 Détermination de l\'équipe pour le capitaine:', {
+      userId: user._id,
+      team1Id: match.team1?.teamId?._id || match.team1?.teamId,
+      team2Id: match.team2?.teamId?._id || match.team2?.teamId,
+      team1Captain: match.team1?.teamId?.captainId?._id || match.team1?.teamId?.captainId,
+      team2Captain: match.team2?.teamId?.captainId?._id || match.team2?.teamId?.captainId
+    });
+
+    // Vérifier si l'user est capitaine de team1
+    const team1Id = match.team1?.teamId?._id || match.team1?.teamId;
+    const team1CaptainId = match.team1?.teamId?.captainId?._id || match.team1?.teamId?.captainId;
+    const isTeam1Captain = team1CaptainId?.toString() === user._id?.toString();
+
+    // Vérifier si l'user est capitaine de team2
+    const team2Id = match.team2?.teamId?._id || match.team2?.teamId;
+    const team2CaptainId = match.team2?.teamId?.captainId?._id || match.team2?.teamId?.captainId;
+    const isTeam2Captain = team2CaptainId?.toString() === user._id?.toString();
+
+    let finalTeamId = null;
+
+    if (isTeam1Captain) {
+      console.log('🔐 User est capitaine de team1:', team1Id);
+      finalTeamId = team1Id;
+    } else if (isTeam2Captain) {
+      console.log('🔐 User est capitaine de team2:', team2Id);
+      finalTeamId = team2Id;
+    } else {
+      console.warn('⚠️ User n\'est capitaine d\'aucune équipe');
+      finalTeamId = team1Id; // Fallback sur team1
+    }
+
+    setSelectedTeamId(finalTeamId);
     
     // Charger les joueurs déjà sélectionnés pour ce match
-    if (match.team1?.selectedPlayers && Array.isArray(match.team1.selectedPlayers)) {
-      setSelectedPlayers(match.team1.selectedPlayers.map(p => p._id || p));
-    } else {
-      setSelectedPlayers([]);
+    let currentSelection = [];
+    if (isTeam1Captain && match.team1?.selectedPlayers && Array.isArray(match.team1.selectedPlayers)) {
+      currentSelection = match.team1.selectedPlayers.map(p => p._id || p);
+    } else if (isTeam2Captain && match.team2?.selectedPlayers && Array.isArray(match.team2.selectedPlayers)) {
+      currentSelection = match.team2.selectedPlayers.map(p => p._id || p);
     }
-  }, [match]);
+    
+    setSelectedPlayers(currentSelection);
+  }, [match, user]);
 
   const getTeamData = () => {
     if (selectedTeamId === match.team1?.teamId?._id) {

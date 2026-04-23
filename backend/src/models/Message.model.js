@@ -11,6 +11,11 @@ const messageSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Team'
   },
+  match: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Match',
+    index: true
+  },
   author: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -24,7 +29,7 @@ const messageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['tournament', 'team'],
+    enum: ['tournament', 'team', 'match'],
     default: 'tournament'
   },
   replyTo: {
@@ -45,6 +50,7 @@ const messageSchema = new mongoose.Schema({
 // Index for efficient querying
 messageSchema.index({ tournament: 1, createdAt: -1 });
 messageSchema.index({ team: 1, createdAt: -1 });
+messageSchema.index({ match: 1, createdAt: -1 });
 messageSchema.index({ author: 1 });
 
 // Virtual for replies

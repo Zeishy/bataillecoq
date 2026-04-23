@@ -18,8 +18,9 @@ const TournamentBracket = ({ bracket, onMatchClick }) => {
     return 'bg-dark-700 border-dark-600';
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
+  const getStatusColor = (match) => {
+    if (match.scoreSubmission?.status === 'pending') return 'bg-amber-500';
+    switch (match.status) {
       case 'completed':
         return 'bg-reunion-green';
       case 'ongoing':
@@ -82,7 +83,7 @@ const TournamentBracket = ({ bracket, onMatchClick }) => {
                     <span className="text-xs font-semibold text-gray-300">
                       Match {match.matchId ? `#${match.position + 1}` : 'TBD'}
                     </span>
-                    <div className={`w-2 h-2 rounded-full ${getStatusColor(match.status)}`} />
+                    <div className={`w-2 h-2 rounded-full ${getStatusColor(match)}`} />
                   </div>
 
                   {/* Team 1 */}
@@ -148,6 +149,10 @@ const TournamentBracket = ({ bracket, onMatchClick }) => {
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-reunion-green"></div>
           <span>Terminé</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+          <span>Validation en cours</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-blue-400"></div>

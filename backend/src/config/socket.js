@@ -97,7 +97,47 @@ export const initializeSocket = (server) => {
       });
     });
 
-    // Typing indicator for tournament
+    // Join match chat room
+    socket.on('match:join', (matchId) => {
+      socket.join(`match:${matchId}`);
+      console.log(`👥 ${socket.user.username} joined match ${matchId}`);
+      
+      socket.to(`match:${matchId}`).emit('user:joined', {
+        userId: socket.user._id,
+        username: socket.user.username,
+        matchId
+      });
+    });
+
+    // Leave match chat room
+    socket.on('match:leave', (matchId) => {
+      socket.leave(`match:${matchId}`);
+      console.log(`👋 ${socket.user.username} left match ${matchId}`);
+      
+      socket.to(`match:${matchId}`).emit('user:left', {
+        userId: socket.user._id,
+        username: socket.user.username,
+        matchId
+      });
+    });
+
+    // Typing indicator for match
+    socket.on('match:typing', ({ matchId, isTyping }) => {
+      socket.to(`match:${matchId}`).emit('user:typing', {
+        userId: socket.user._id,
+        username: socket.user.username,
+        matchId,
+        isTyping
+      });
+    });
+
+    // New message in match
+    socket.on('match:message', (data) => {
+      io.to(`match:${data.matchId}`).emit('message:new', {
+        ...data,
+        type: 'match'
+      });
+    });
     socket.on('tournament:typing', ({ tournamentId, isTyping }) => {
       socket.to(`tournament:${tournamentId}`).emit('user:typing', {
         userId: socket.user._id,
@@ -135,18 +175,28 @@ export const initializeSocket = (server) => {
 
     // Message edited
     socket.on('message:edit', (data) => {
-      const room = data.tournamentId 
-        ? `tournament:${data.tournamentId}` 
-        : `team:${data.teamId}`;
+      let room;
+      if (data.matchId) {
+        room = `match:${data.matchId}`;
+      } else if (data.tournamentId) {
+        room = `tournament:${data.tournamentId}`;
+      } else if (data.teamId) {
+        room = `team:${data.teamId}`;
+      }
       
       io.to(room).emit('message:edited', data);
     });
 
     // Message deleted
     socket.on('message:delete', (data) => {
-      const room = data.tournamentId 
-        ? `tournament:${data.tournamentId}` 
-        : `team:${data.teamId}`;
+      let room;
+      if (data.matchId) {
+        room = `match:${data.matchId}`;
+      } else if (data.tournamentId) {
+        room = `tournament:${data.tournamentId}`;
+      } else if (data.teamId) {
+        room = `team:${data.teamId}`;
+      }
       
       io.to(room).emit('message:deleted', data);
     });

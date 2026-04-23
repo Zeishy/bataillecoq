@@ -56,6 +56,18 @@ const mapPoolSchema = new mongoose.Schema({
       default: 'bo3'
     }
   ],
+  sequences: [
+    {
+      format: { type: String, enum: ['bo1', 'bo3', 'bo5', 'bo7', 'bo9'] },
+      steps: [
+        {
+          action: { type: String, enum: ['ban', 'pick', 'auto-pick'] },
+          mode: String,
+          teamRole: { type: String, enum: ['A', 'B', 'none'] }
+        }
+      ]
+    }
+  ],
   isActive: {
     type: Boolean,
     default: true

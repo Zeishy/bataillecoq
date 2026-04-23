@@ -39,10 +39,36 @@ const matchSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId
     }]
   },
+  // Score Submission and Validation
+  scoreSubmission: {
+    status: {
+      type: String,
+      enum: ['not-submitted', 'pending', 'approved', 'rejected'],
+      default: 'not-submitted'
+    },
+    submittedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team'
+    },
+    submittedAt: Date,
+    team1Score: Number,
+    team2Score: Number,
+    screenshots: [{
+      url: String,
+      uploadedAt: Date
+    }],
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    approvedAt: Date,
+    rejectionReason: String,
+    rejectedAt: Date
+  },
   scheduledDate: Date,
   status: {
     type: String,
-    enum: ['pending', 'ongoing', 'completed', 'cancelled'],
+    enum: ['pending', 'ready', 'ongoing', 'completed', 'cancelled'],
     default: 'pending'
   },
   // Pick and Ban System
@@ -59,7 +85,7 @@ const matchSchema = new mongoose.Schema({
   pickAndBan: {
     status: {
       type: String,
-      enum: ['not-started', 'in-progress', 'completed'],
+      enum: ['not-started', 'side-selection', 'in-progress', 'completed'],
       default: 'not-started'
     },
     selectedMaps: [{
@@ -131,6 +157,55 @@ matchSchema.methods.updateScore = function(teamId, score) {
   } else if (this.team2.score > this.team1.score) {
     this.winner = this.team2.teamId;
   }
+};
+
+// Method to submit score with screenshots
+matchSchema.methods.submitScore = function(teamId, team1Score, team2Score, screenshotUrls) {
+  this.scoreSubmission = {
+    status: 'pending',
+    submittedBy: teamId,
+    submittedAt: new Date(),
+    team1Score,
+    team2Score,
+    screenshots: screenshotUrls.map(url => ({
+      url,
+      uploadedAt: new Date()
+    }))
+  };
+};
+
+// Method to approve score
+matchSchema.methods.approveScore = function(adminId) {
+  if (this.scoreSubmission.status !== 'pending') {
+    throw new Error('Score is not pending approval');
+  }
+  
+  this.team1.score = this.scoreSubmission.team1Score;
+  this.team2.score = this.scoreSubmission.team2Score;
+  this.status = 'completed';
+  
+  // Determine winner
+  if (this.team1.score > this.team2.score) {
+    this.winner = this.team1.teamId;
+  } else if (this.team2.score > this.team1.score) {
+    this.winner = this.team2.teamId;
+  }
+  
+  this.scoreSubmission.status = 'approved';
+  this.scoreSubmission.approvedBy = adminId;
+  this.scoreSubmission.approvedAt = new Date();
+};
+
+// Method to reject score
+matchSchema.methods.rejectScore = function(adminId, reason) {
+  if (this.scoreSubmission.status !== 'pending') {
+    throw new Error('Score is not pending approval');
+  }
+  
+  this.scoreSubmission.status = 'rejected';
+  this.scoreSubmission.approvedBy = adminId;
+  this.scoreSubmission.rejectedAt = new Date();
+  this.scoreSubmission.rejectionReason = reason;
 };
 
 // Method to complete match

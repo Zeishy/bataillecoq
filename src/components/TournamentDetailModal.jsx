@@ -22,9 +22,11 @@ import TournamentBracket from './TournamentBracket';
 import SelectMatchPlayersModal from './SelectMatchPlayersModal';
 import TournamentMatches from './TournamentMatches';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 
 export default function TournamentDetailModal({ isOpen, onClose, tournament, onRegister }) {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const [activeTab, setActiveTab] = useState('info');
   const [bracket, setBracket] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -47,6 +49,24 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
       fetchTournamentData();
     }
   }, [isOpen, tournament]);
+
+  // Real-time updates via socket
+  useEffect(() => {
+    if (!socket || !isOpen || !tournament) return;
+
+    const tournamentId = tournament._id;
+    socket.emit('tournament:join', tournamentId);
+
+    socket.on('tournament:updated', (data) => {
+      console.log('Real-time update received for tournament:', data);
+      fetchTournamentData();
+    });
+
+    return () => {
+      socket.off('tournament:updated');
+      socket.emit('tournament:leave', tournamentId);
+    };
+  }, [socket, isOpen, tournament?._id]);
 
   const findUserTeamInTournament = (data) => {
     if (!user || !data) return;
@@ -509,7 +529,16 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       Arbre du tournoi
                     </h3>
                     {bracket ? (
-                      <TournamentBracket bracket={bracket} />
+                    <TournamentBracket 
+                      bracket={bracket} 
+                      onMatchClick={(match) => {
+                        const id = match._id || match.matchId;
+                        if (id) {
+                          navigate(`/matches/${id}`);
+                          onClose(); // Fermer le modal
+                        }
+                      }}
+                    />
                     ) : (
                       <div className="text-center py-12">
                         <Target className="w-16 h-16 text-gray-600 mx-auto mb-3" />

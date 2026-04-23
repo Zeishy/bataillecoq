@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Users, UserCheck, AlertCircle, CheckCircle2, Loader } from 'lucide-react';
 import { matchService } from '../services/matchService';
 import { tournamentService } from '../services/tournamentService';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 // Configuration du nombre de joueurs par jeu
@@ -14,6 +15,7 @@ const GAME_PLAYER_REQUIREMENTS = {
 };
 
 export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId, onSuccess }) {
+  const { user } = useAuth();
   const [selectedPlayers, setSelectedPlayers] = useState([]);
   const [availablePlayers, setAvailablePlayers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,39 +45,112 @@ export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId
     setIsFetching(true);
     setError('');
     try {
+      // ✅ Vérification 1: Utilisateur authentifié
+      if (!user || !user._id) {
+        setError('Utilisateur non authentifié');
+        setAvailablePlayers([]);
+        setIsFetching(false);
+        return;
+      }
+
+      console.log('📋 Chargement des joueurs pour:', {
+        userId: user._id,
+        teamId: teamId,
+        matchId: match._id
+      });
+
       // Récupérer le tournoi avec les inscriptions
       const tournamentId = match.tournamentId?._id || match.tournamentId;
       const response = await tournamentService.getTournamentById(tournamentId);
       
-      // Trouver l'inscription de l'équipe
+      // ✅ Vérification 2: Trouver l'inscription de l'équipe
       const registration = response.tournament.registeredTeams.find(
-        rt => (rt.teamId?._id || rt.teamId) === teamId
+        rt => {
+          const registrationTeamId = rt.teamId?._id || rt.teamId;
+          return registrationTeamId.toString() === teamId.toString();
+        }
       );
 
       if (!registration) {
+        console.error('❌ Inscription non trouvée pour teamId:', teamId);
         setError('Inscription de l\'équipe non trouvée');
         setAvailablePlayers([]);
+        setIsFetching(false);
         return;
       }
 
-      // Récupérer tous les joueurs disponibles (titulaires + remplaçants)
       const teamData = registration.teamId;
+      
+      if (!teamData) {
+        console.error('❌ Données de l\'équipe non trouvées');
+        setError('Données de l\'équipe non trouvées');
+        setAvailablePlayers([]);
+        setIsFetching(false);
+        return;
+      }
+
+      // ✅ Vérification 3: Vérifier que l'user est bien capitaine de cette équipe
+      const teamCaptainId = teamData.captainId?._id || teamData.captainId;
+      const isUserCaptain = teamCaptainId.toString() === user._id.toString();
+
+      console.log('🔐 Vérification du capitaine:', {
+        teamCaptainId: teamCaptainId.toString(),
+        userId: user._id.toString(),
+        isUserCaptain: isUserCaptain,
+        teamName: teamData.name
+      });
+
+      if (!isUserCaptain) {
+        console.warn('⚠️ Utilisateur n\'est pas capitaine de cette équipe');
+        setError('Vous devez être capitaine de l\'équipe pour sélectionner les joueurs');
+        setAvailablePlayers([]);
+        setIsFetching(false);
+        return;
+      }
+
+      console.log('✅ Utilisateur est bien capitaine de l\'équipe');
+
+      // ✅ Récupérer tous les joueurs disponibles (titulaires + remplaçants)
       const playerIds = [
         ...(registration.players || []),
         ...(registration.substitutes || [])
       ];
 
-      // Filtrer les joueurs de l'équipe qui sont dans la liste d'inscription
+      console.log('📊 Joueurs inscrits:', {
+        titulaires: registration.players?.length || 0,
+        remplaçants: registration.substitutes?.length || 0,
+        total: playerIds.length
+      });
+
+      // ✅ Filtrer les joueurs de l'équipe qui sont dans la liste d'inscription
       const players = (teamData.players || []).filter(p => {
         const playerId = p.playerId?._id || p.playerId?.userId?._id || p.userId?._id || p._id;
         return playerIds.some(pid => pid.toString() === playerId.toString());
       });
 
-      console.log('Available players for match:', players);
+      if (players.length === 0) {
+        console.warn('⚠️ Aucun joueur trouvé pour l\'équipe');
+        setError('Aucun joueur disponible pour cette équipe');
+        setAvailablePlayers([]);
+        setIsFetching(false);
+        return;
+      }
+
+      console.log('✅ Joueurs disponibles chargés:', {
+        count: players.length,
+        team: teamData.name,
+        players: players.map(p => ({
+          id: p.playerId?._id || p.userId?._id,
+          username: p.playerId?.userId?.username || p.username,
+          inGame: p.playerId?.inGameName || p.inGameName
+        }))
+      });
+      
       setAvailablePlayers(players);
     } catch (err) {
-      console.error('Error fetching team registration:', err);
-      setError('Impossible de charger les joueurs disponibles');
+      console.error('❌ Erreur lors du chargement des joueurs:', err);
+      const errorMsg = err.response?.data?.message || 'Impossible de charger les joueurs disponibles';
+      setError(errorMsg);
       setAvailablePlayers([]);
     } finally {
       setIsFetching(false);
@@ -110,13 +185,33 @@ export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId
     setError('');
 
     try {
+      console.log('📤 Soumission de la sélection:', {
+        matchId: match._id,
+        teamId: teamId,
+        userId: user._id,
+        playersCount: selectedPlayers.length,
+        selectedPlayers
+      });
+
       await matchService.selectPlayers(match._id, teamId, selectedPlayers);
+      
+      console.log('✅ Sélection réussie');
       toast.success('Joueurs sélectionnés avec succès !');
       onSuccess?.();
       onClose();
     } catch (err) {
-      console.error('Error selecting players:', err);
-      const errorMessage = err.response?.data?.message || 'Erreur lors de la sélection des joueurs';
+      console.error('❌ Erreur lors de la sélection:', err);
+      
+      // Gestion spécifique de l'erreur d'authentification
+      let errorMessage = err.response?.data?.message || 'Erreur lors de la sélection des joueurs';
+      
+      if (err.response?.status === 403) {
+        errorMessage = 'Accès refusé: Seul le capitaine peut sélectionner les joueurs';
+      } else if (err.response?.status === 400) {
+        // Erreur de validation
+        errorMessage = err.response.data.message || 'Données invalides';
+      }
+      
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {

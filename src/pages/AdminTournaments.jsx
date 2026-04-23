@@ -8,7 +8,6 @@ import gameService from '../services/gameService';
 import { getMapPoolsByGame } from '../services/mapPoolService';
 import GamesManagement from '../components/GamesManagement';
 import PickAndBanModal from '../components/PickAndBanModal';
-import AdminPickAndBanDemo from '../components/AdminPickAndBanDemo';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -22,7 +21,6 @@ const AdminTournaments = () => {
   const [showGamesModal, setShowGamesModal] = useState(false);
   const [showPickAndBanModal, setShowPickAndBanModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null);
-  const [activeTab, setActiveTab] = useState('tournaments');
   const [formData, setFormData] = useState({
     name: '',
     game: '',
@@ -323,40 +321,9 @@ const AdminTournaments = () => {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-8 border-b border-dark-700">
-          <motion.button
-            onClick={() => setActiveTab('tournaments')}
-            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
-              activeTab === 'tournaments'
-                ? 'text-reunion-blue border-reunion-blue'
-                : 'text-gray-400 hover:text-white border-transparent'
-            }`}
-            whileHover={{ y: -2 }}
-            whileTap={{ y: 0 }}
-          >
-            Gestion des Tournois
-          </motion.button>
-          <motion.button
-            onClick={() => setActiveTab('demo')}
-            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
-              activeTab === 'demo'
-                ? 'text-reunion-blue border-reunion-blue'
-                : 'text-gray-400 hover:text-white border-transparent'
-            }`}
-            whileHover={{ y: -2 }}
-            whileTap={{ y: 0 }}
-          >
-            Démo Pick & Ban
-          </motion.button>
-        </div>
-
-        {/* Content Area - Conditional Rendering */}
-        {activeTab === 'tournaments' ? (
-          <>
-            {/* Tournaments Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {tournaments.map((tournament) => (
+        {/* Tournaments Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {tournaments.map((tournament) => (
             <motion.div
               key={tournament._id}
               initial={{ opacity: 0, y: 20 }}

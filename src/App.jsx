@@ -24,70 +24,70 @@ function App() {
           <div className="min-h-screen bg-dark-900">
             <Header />
             <Routes>
-            {/* Routes publiques */}
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/tournaments" element={<Tournaments />} />
-            <Route path="/teams" element={<Teams />} />
-            <Route path="/rankings" element={<Rankings />} />
-            <Route path="/matches/:matchId" element={<MatchDetail />} />
-            
-            {/* Routes protégées */}
-            <Route
+              {/* Routes publiques */}
+              {/* <Route path="/" element={<Home />} /> */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/tournaments" element={<Tournaments />} />
+              <Route path="/teams" element={<Teams />} />
+              <Route path="/rankings" element={<Rankings />} />
+              <Route path="/matches/:matchId" element={<MatchDetail />} />
+
+              {/* Routes protégées */}
+              {/* <Route
               path="/stats"
               element={
                 <ProtectedRoute>
                   <PersonalStats />
                 </ProtectedRoute>
               }
-            />
-            
-            {/* Routes admin */}
-            <Route
-              path="/admin/tournaments"
-              element={
-                <ProtectedAdminRoute>
-                  <AdminTournaments />
-                </ProtectedAdminRoute>
-              }
-            />
-            <Route
-              path="/admin/tournaments/:id"
-              element={
-                <ProtectedAdminRoute>
-                  <AdminTournamentDetail />
-                </ProtectedAdminRoute>
-              }
-            />
-          </Routes>
-          
-          {/* Toast notifications */}
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: '#1f2937',
-                color: '#fff',
-                border: '1px solid #374151',
-              },
-              success: {
-                iconTheme: {
-                  primary: '#10b981',
-                  secondary: '#fff',
+            /> */}
+
+              {/* Routes admin */}
+              <Route
+                path="/admin/tournaments"
+                element={
+                  <ProtectedAdminRoute>
+                    <AdminTournaments />
+                  </ProtectedAdminRoute>
+                }
+              />
+              <Route
+                path="/admin/tournaments/:id"
+                element={
+                  <ProtectedAdminRoute>
+                    <AdminTournamentDetail />
+                  </ProtectedAdminRoute>
+                }
+              />
+            </Routes>
+
+            {/* Toast notifications */}
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                duration: 4000,
+                style: {
+                  background: '#1f2937',
+                  color: '#fff',
+                  border: '1px solid #374151',
                 },
-              },
-              error: {
-                iconTheme: {
-                  primary: '#ef4444',
-                  secondary: '#fff',
+                success: {
+                  iconTheme: {
+                    primary: '#10b981',
+                    secondary: '#fff',
+                  },
                 },
-              },
-            }}
-          />
-        </div>
-      </SocketProvider>
+                error: {
+                  iconTheme: {
+                    primary: '#ef4444',
+                    secondary: '#fff',
+                  },
+                },
+              }}
+            />
+          </div>
+        </SocketProvider>
       </AuthProvider>
     </Router>
   );

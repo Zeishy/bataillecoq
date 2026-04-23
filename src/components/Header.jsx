@@ -10,11 +10,11 @@ const Header = () => {
   const { user, isAuthenticated, logout } = useAuth();
   
   const navItems = [
-    { name: 'Home', path: '/', icon: Trophy },
+    // { name: 'Home', path: '/', icon: Trophy },
     { name: 'Tournaments', path: '/tournaments', icon: Trophy },
     { name: 'Teams', path: '/teams', icon: Users },
     { name: 'Rankings', path: '/rankings', icon: BarChart3 },
-    { name: 'Personal Stats', path: '/stats', icon: User },
+    // { name: 'Personal Stats', path: '/stats', icon: User },
   ];
 
   return (

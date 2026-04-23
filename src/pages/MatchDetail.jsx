@@ -1,24 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
 import MatchScorePanel from '../components/MatchScorePanel';
 import MatchPickAndBan from '../components/MatchPickAndBan';
+import MatchChat from '../components/MatchChat';
+import MatchScoreSubmission from '../components/MatchScoreSubmission';
 import matchService from '../services/matchService';
-import { getMapPool } from '../services/mapPoolService';
-import playerService from '../services/playerService';
+import teamService from '../services/teamService';
 import { getWinner, isMatchComplete } from '../utils/matchFormat';
 
 const MatchDetail = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [match, setMatch] = useState(null);
-  const [mapPool, setMapPool] = useState(null);
   const [team1, setTeam1] = useState(null);
   const [team2, setTeam2] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+  const [confirmingReady, setConfirmingReady] = useState(false);
 
   useEffect(() => {
     loadMatchData();
@@ -29,23 +33,18 @@ const MatchDetail = () => {
       setLoading(true);
       
       // Load match
-      const matchData = await matchService.getMatch(matchId);
+      const response = await matchService.getMatch(matchId);
+      const matchData = response.match || response;
       setMatch(matchData);
 
       // Load teams
-      if (matchData.team1Id) {
-        const t1 = await playerService.getTeam(matchData.team1Id);
+      if (matchData.team1?.teamId) {
+        const t1 = await teamService.getTeam(matchData.team1.teamId._id || matchData.team1.teamId);
         setTeam1(t1);
       }
-      if (matchData.team2Id) {
-        const t2 = await playerService.getTeam(matchData.team2Id);
+      if (matchData.team2?.teamId) {
+        const t2 = await teamService.getTeam(matchData.team2.teamId._id || matchData.team2.teamId);
         setTeam2(t2);
-      }
-
-      // Load map pool if exists
-      if (matchData.mapPoolId) {
-        const pool = await getMapPool(matchData.mapPoolId);
-        setMapPool(pool);
       }
 
       setError('');
@@ -76,6 +75,52 @@ const MatchDetail = () => {
     loadMatchData();
   };
 
+  // 🎯 Handle confirming match ready to start ongoing
+  const handleConfirmMatchReady = async () => {
+    if (!match || match.status !== 'ready') {
+      toast.error('Le match doit être en status "ready" pour être confirmé');
+      return;
+    }
+
+    try {
+      setConfirmingReady(true);
+      await matchService.confirmMatchReady(match._id);
+      toast.success('Match confirmé! Le match est maintenant en cours.');
+      loadMatchData(); // Rafraîchir les données
+    } catch (error) {
+      console.error('Erreur lors de la confirmation:', error);
+      const errorMsg = error.response?.data?.message || 'Erreur lors de la confirmation du match';
+      toast.error(errorMsg);
+    } finally {
+      setConfirmingReady(false);
+    }
+  };
+
+  // 🎯 Determine which team the current user is captain of
+  const determineUserTeam = () => {
+    if (!match || !user) return null;
+
+    const team1Data = match.team1?.teamId;
+    const team2Data = match.team2?.teamId;
+    
+    const team1Id = team1Data?._id || team1Data;
+    const team2Id = team2Data?._id || team2Data;
+    
+    const team1CaptainId = team1Data?.captainId?._id || team1Data?.captainId;
+    const team2CaptainId = team2Data?.captainId?._id || team2Data?.captainId;
+
+    if (team1CaptainId?.toString() === user._id?.toString()) {
+      return team1Id;
+    } else if (team2CaptainId?.toString() === user._id?.toString()) {
+      return team2Id;
+    }
+
+    return null;
+  };
+
+  const userTeamId = determineUserTeam();
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -103,8 +148,18 @@ const MatchDetail = () => {
     );
   }
 
-  const matchWinner = getWinner(match.team1Score || 0, match.team2Score || 0, match.matchFormat);
-  const isComplete = isMatchComplete(match.team1Score || 0, match.team2Score || 0, match.matchFormat);
+  const isComplete = match?.status?.toLowerCase().trim() === 'completed' || !!match?.winner;
+  
+  // Use stored winner instead of calculating from scores (scores may be actual game scores, not Best-of format)
+  let matchWinner = null;
+  if (isComplete && match?.winner) {
+    matchWinner = match.winner.toString() === match.team1?.teamId?._id?.toString() || match.winner.toString() === match.team1?.teamId
+      ? 'team1'
+      : 'team2';
+  }
+  
+  const isMatchOngoing = match?.status?.toLowerCase().trim() !== 'completed' && 
+                         match?.status?.toLowerCase().trim() !== 'cancelled';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white py-8 px-4">
@@ -139,7 +194,7 @@ const MatchDetail = () => {
                 >
                   <p className="text-slate-300 text-sm mb-2">{team1.name}</p>
                   <p className="text-4xl font-bold text-white">
-                    {match.team1Score || 0}
+                    {match.team1?.score || 0}
                   </p>
                   {isComplete && matchWinner === 'team1' && (
                     <p className="text-green-400 text-sm mt-2 font-bold">✓ VICTOIRE</p>
@@ -152,10 +207,12 @@ const MatchDetail = () => {
                   Format: <span className="font-bold text-white">{match.matchFormat?.toUpperCase()}</span>
                 </div>
                 <div className="text-slate-500 text-xs">
-                  {isComplete ? (
+                  {match.status?.toLowerCase().trim() === 'completed' || isComplete ? (
                     <span className="text-green-400 font-bold">✓ MATCH TERMINÉ</span>
+                  ) : (match.status?.toLowerCase().trim() === 'ongoing' || match.status?.toLowerCase().trim() === 'ready' || match.pickAndBan?.status !== 'not-started') ? (
+                    <span className="text-blue-400 font-bold">● EN COURS</span>
                   ) : (
-                    <span className="text-yellow-400">EN COURS</span>
+                    <span className="text-yellow-400 font-bold">● EN ATTENTE</span>
                   )}
                 </div>
               </div>
@@ -167,7 +224,7 @@ const MatchDetail = () => {
                 >
                   <p className="text-slate-300 text-sm mb-2">{team2.name}</p>
                   <p className="text-4xl font-bold text-white">
-                    {match.team2Score || 0}
+                    {match.team2?.score || 0}
                   </p>
                   {isComplete && matchWinner === 'team2' && (
                     <p className="text-green-400 text-sm mt-2 font-bold">✓ VICTOIRE</p>
@@ -178,13 +235,50 @@ const MatchDetail = () => {
           </div>
         </motion.div>
 
+        {/* Ready Confirmation Button */}
+        {match?.status === 'ready' && userTeamId && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 bg-amber-500/20 border border-amber-500/50 rounded-lg"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="text-2xl">⏳</div>
+                <div>
+                  <p className="font-semibold text-amber-300">Le match est prêt!</p>
+                  <p className="text-sm text-amber-200">Les deux équipes ont sélectionné leurs joueurs.</p>
+                </div>
+              </div>
+              <motion.button
+                onClick={handleConfirmMatchReady}
+                disabled={confirmingReady}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {confirmingReady ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Confirmation...
+                  </>
+                ) : (
+                  <>
+                    ✓ Confirmer et commencer
+                  </>
+                )}
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-slate-700">
-          {['overview', 'score', 'pickban', 'players'].map((tab) => (
+        <div className="flex gap-2 mb-6 border-b border-slate-700 overflow-x-auto">
+          {['overview', 'score', 'pickban', 'players', 'score-submit', 'chat'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-3 font-semibold transition-colors ${
+              className={`px-4 py-3 font-semibold transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? 'text-purple-400 border-b-2 border-purple-500'
                   : 'text-slate-400 hover:text-slate-300'
@@ -194,6 +288,8 @@ const MatchDetail = () => {
               {tab === 'score' && '📊 Score'}
               {tab === 'pickban' && '🎮 Pick & Ban'}
               {tab === 'players' && '👥 Joueurs'}
+              {tab === 'score-submit' && '✓ Soumettre score'}
+              {tab === 'chat' && '💬 Chat'}
             </button>
           ))}
         </div>
@@ -283,12 +379,12 @@ const MatchDetail = () => {
           {/* Pick & Ban Tab */}
           {activeTab === 'pickban' && (
             <>
-              {mapPool ? (
+              {match?.mapPoolId?._id || match?.mapPoolId ? (
                 <MatchPickAndBan
                   match={match}
-                  mapPool={mapPool}
+                  mapPool={match.mapPoolId?._id || match.mapPoolId}
                   isTeamCaptain={true}
-                  teamId={team1?._id}
+                  teamId={userTeamId}
                   onComplete={handlePickAndBanComplete}
                 />
               ) : (
@@ -343,6 +439,48 @@ const MatchDetail = () => {
                 </div>
               </motion.div>
             </div>
+          )}
+
+          {/* Score Submission Tab */}
+          {activeTab === 'score-submit' && (isMatchOngoing || isAdmin) && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <MatchScoreSubmission
+                match={match}
+                team1Name={team1?.name}
+                team2Name={team2?.name}
+                onSuccess={loadMatchData}
+                isAdmin={isAdmin}
+              />
+            </motion.div>
+          )}
+
+          {activeTab === 'score-submit' && !isMatchOngoing && !isAdmin && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 text-center text-slate-400"
+            >
+              <p>Le match doit être en cours (ongoing) pour soumettre un score</p>
+            </motion.div>
+          )}
+
+          {/* Chat Tab */}
+          {activeTab === 'chat' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 h-[600px]"
+            >
+              <MatchChat 
+                matchId={matchId}
+                team1Name={team1?.name}
+                team2Name={team2?.name}
+                currentUserTeamId={userTeamId}
+              />
+            </motion.div>
           )}
         </motion.div>
       </div>

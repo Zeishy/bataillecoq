@@ -13,6 +13,17 @@ export const startPickAndBan = async (matchId) => {
   }
 };
 
+// Select side
+export const selectSide = async (matchId, teamId, side) => {
+  try {
+    const response = await api.post(`${API_URL}/${matchId}/select-side`, { teamId, side });
+    return response.data;
+  } catch (error) {
+    console.error('Error selecting side:', error);
+    throw error;
+  }
+};
+
 // Pick a map
 export const pickMap = async (matchId, mapName, mode, teamId) => {
   try {

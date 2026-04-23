@@ -1,6 +1,7 @@
 import Message from '../models/Message.model.js';
 import Tournament from '../models/Tournament.js';
 import Team from '../models/Team.js';
+import Match from '../models/Match.js';
 import { getIO } from '../config/socket.js';
 
 // @desc    Get messages for a tournament
@@ -97,12 +98,80 @@ export const getTeamMessages = async (req, res) => {
   }
 };
 
+// @desc    Get messages for a match
+// @route   GET /api/messages/matches/:matchId/messages
+// @access  Private (Match participants only)
+export const getMatchMessages = async (req, res) => {
+  try {
+    const { matchId } = req.params;
+    const { limit = 50, skip = 0 } = req.query;
+
+    // Get match and verify participation
+    const match = await Match.findById(matchId)
+      .populate('team1.teamId', 'name captainId')
+      .populate('team2.teamId', 'name captainId');
+
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        message: 'Match non trouvé'
+      });
+    }
+
+    // Check if user is participant or team captain
+    const userId = req.user._id.toString();
+    const team1PlayerIds = (match.team1?.selectedPlayers || []).map(id => id.toString());
+    const team2PlayerIds = (match.team2?.selectedPlayers || []).map(id => id.toString());
+    const team1CaptainId = match.team1?.teamId?.captainId?._id?.toString();
+    const team2CaptainId = match.team2?.teamId?.captainId?._id?.toString();
+    
+    const isParticipant = team1PlayerIds.includes(userId) || 
+                          team2PlayerIds.includes(userId);
+    const isCaptain = team1CaptainId === userId || team2CaptainId === userId;
+
+    if (!isParticipant && !isCaptain) {
+      return res.status(403).json({
+        success: false,
+        message: 'Accès refusé - participants du match uniquement'
+      });
+    }
+
+    const messages = await Message.find({
+      match: matchId,
+      type: 'match'
+    })
+      .populate('author', 'username avatar')
+      .populate('team', 'name')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(skip));
+
+    const total = await Message.countDocuments({
+      match: matchId,
+      type: 'match'
+    });
+
+    res.json({
+      success: true,
+      messages: messages.reverse(),
+      total
+    });
+  } catch (error) {
+    console.error('Get match messages error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération des messages'
+    });
+  }
+};
+
 // @desc    Post a message
 // @route   POST /api/messages
 // @access  Private
 export const postMessage = async (req, res) => {
   try {
-    const { tournament, team, content, type, replyTo } = req.body;
+    const { tournament, team, match, content, type, replyTo } = req.body;
+    const { matchId } = req.params;
 
     if (!content || content.trim().length === 0) {
       return res.status(400).json({
@@ -118,8 +187,55 @@ export const postMessage = async (req, res) => {
       });
     }
 
-    // Verify tournament or team exists
-    if (type === 'tournament') {
+    // Determine message type and validate
+    let messageType = type || 'tournament';
+    let messageData = {
+      author: req.user._id,
+      content: content.trim(),
+      replyTo: replyTo || null
+    };
+
+    // If creating match message via POST /matches/:matchId/messages
+    if (matchId) {
+      messageType = 'match';
+      const matchRecord = await Match.findById(matchId)
+        .populate('team1.teamId', 'name captainId')
+        .populate('team2.teamId', 'name captainId');
+
+      if (!matchRecord) {
+        return res.status(404).json({
+          success: false,
+          message: 'Match non trouvé'
+        });
+      }
+
+      // Check if user is participant or team captain
+      const userId = req.user._id.toString();
+      const team1PlayerIds = (matchRecord.team1?.selectedPlayers || []).map(id => id.toString());
+      const team2PlayerIds = (matchRecord.team2?.selectedPlayers || []).map(id => id.toString());
+      const team1CaptainId = matchRecord.team1?.teamId?.captainId?._id?.toString();
+      const team2CaptainId = matchRecord.team2?.teamId?.captainId?._id?.toString();
+      
+      let userTeamId = null;
+      if (team1PlayerIds.includes(userId) || team1CaptainId === userId) {
+        userTeamId = matchRecord.team1.teamId._id;
+      } else if (team2PlayerIds.includes(userId) || team2CaptainId === userId) {
+        userTeamId = matchRecord.team2.teamId._id;
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: 'Vous n\'êtes pas participant du match'
+        });
+      }
+
+      messageData = {
+        ...messageData,
+        match: matchId,
+        tournament: matchRecord.tournamentId,
+        team: userTeamId,
+        type: messageType
+      };
+    } else if (type === 'tournament') {
       const tournamentExists = await Tournament.findById(tournament);
       if (!tournamentExists) {
         return res.status(404).json({
@@ -127,6 +243,11 @@ export const postMessage = async (req, res) => {
           message: 'Tournoi non trouvé'
         });
       }
+      messageData = {
+        ...messageData,
+        tournament,
+        type: messageType
+      };
     } else if (type === 'team') {
       const teamExists = await Team.findById(team);
       if (!teamExists) {
@@ -147,31 +268,36 @@ export const postMessage = async (req, res) => {
           message: 'Vous devez être membre de l\'équipe'
         });
       }
+      messageData = {
+        ...messageData,
+        team,
+        tournament,
+        type: messageType
+      };
     }
 
-    const message = await Message.create({
-      tournament,
-      team,
-      author: req.user._id,
-      content: content.trim(),
-      type,
-      replyTo: replyTo || null
-    });
+    const message = await Message.create(messageData);
 
     const populatedMessage = await Message.findById(message._id)
       .populate('author', 'username avatar')
+      .populate('team', 'name')
       .populate('replyTo', 'content author');
 
     // Emit Socket.IO event for real-time updates
     try {
       const io = getIO();
-      const room = type === 'tournament' 
-        ? `tournament:${tournament}` 
-        : `team:${team}`;
+      let room;
+      if (messageType === 'match') {
+        room = `match:${matchId}`;
+      } else if (messageType === 'tournament') {
+        room = `tournament:${tournament}`;
+      } else if (messageType === 'team') {
+        room = `team:${team}`;
+      }
       
       io.to(room).emit('message:new', {
         message: populatedMessage,
-        type
+        type: messageType
       });
     } catch (socketError) {
       console.error('Socket.IO error:', socketError);
@@ -235,9 +361,14 @@ export const editMessage = async (req, res) => {
     // Emit Socket.IO event for real-time updates
     try {
       const io = getIO();
-      const room = message.tournament 
-        ? `tournament:${message.tournament}` 
-        : `team:${message.team}`;
+      let room;
+      if (message.match) {
+        room = `match:${message.match}`;
+      } else if (message.tournament) {
+        room = `tournament:${message.tournament}`;
+      } else if (message.team) {
+        room = `team:${message.team}`;
+      }
       
       io.to(room).emit('message:edited', {
         message: populatedMessage
@@ -291,9 +422,14 @@ export const deleteMessage = async (req, res) => {
     // Emit Socket.IO event for real-time updates
     try {
       const io = getIO();
-      const room = message.tournament 
-        ? `tournament:${message.tournament}` 
-        : `team:${message.team}`;
+      let room;
+      if (message.match) {
+        room = `match:${message.match}`;
+      } else if (message.tournament) {
+        room = `tournament:${message.tournament}`;
+      } else if (message.team) {
+        room = `team:${message.team}`;
+      }
       
       io.to(room).emit('message:deleted', {
         messageId: message._id,

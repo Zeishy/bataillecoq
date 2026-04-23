@@ -7,16 +7,18 @@ import matchService from '../services/matchService';
 import { getWinner, isMatchComplete, formatScoreDisplay } from '../utils/matchFormat';
 import PlayerSelectionModal from './PlayerSelectionModal';
 import MatchPickAndBan from './MatchPickAndBan';
+import { useAuth } from '../context/AuthContext';
 
 const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedMatchId, setExpandedMatchId] = useState(null);
   const [playerSelectionModal, setPlayerSelectionModal] = useState({ isOpen: false, match: null });
-  const [pickBanModal, setPickBanModal] = useState({ isOpen: false, match: null });
+  const [pickBanModal, setPickBanModal] = useState({ isOpen: false, match: null, userTeamId: null });
 
   useEffect(() => {
     loadMatches();
@@ -41,7 +43,7 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
 
   const getMatchStatus = (match) => {
     if (match.status === 'completed') return 'completed';
-    if (match.pickAndBan?.status === 'in-progress' || match.pickAndBan?.status === 'completed') {
+    if (match.status === 'ongoing' || match.pickAndBan?.status === 'in-progress' || match.pickAndBan?.status === 'completed') {
       return 'in-progress';
     }
     return 'upcoming';
@@ -65,6 +67,45 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
     return false;
   };
 
+  // 🎯 Détermine l'état de l'équipe dans le match
+  const getTeamState = (match, teamPosition) => {
+    const teamData = teamPosition === 1 ? match.team1 : match.team2;
+    
+    // État: Pick & Ban complété
+    if (match.pickAndBan?.status === 'completed') {
+      return {
+        status: 'completed',
+        label: '✓ Pick & Ban fait',
+        color: 'text-green-400 bg-green-500/10 border-green-500/30'
+      };
+    }
+    
+    // État: Pick & Ban en cours
+    if (match.pickAndBan?.status === 'in-progress') {
+      return {
+        status: 'in-progress',
+        label: '⏳ Pick & Ban en cours',
+        color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+      };
+    }
+    
+    // État: Joueurs sélectionnés
+    if (teamData?.selectedPlayers && teamData.selectedPlayers.length > 0) {
+      return {
+        status: 'ready',
+        label: '✓ Prêt',
+        color: 'text-blue-400 bg-blue-500/10 border-blue-500/30'
+      };
+    }
+    
+    // État: À sélectionner
+    return {
+      status: 'pending',
+      label: '○ À sélectionner',
+      color: 'text-slate-400 bg-slate-700/20 border-slate-600/30'
+    };
+  };
+
   const handleMatchClick = (matchId, e) => {
     // Si on clique sur un bouton, ne pas naviguer
     if (e.target.closest('button')) {
@@ -80,7 +121,25 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
 
   const openPickBan = (match, e) => {
     e.stopPropagation();
-    setPickBanModal({ isOpen: true, match });
+    
+    console.log('🎯 Opening Pick & Ban modal for match:', match._id);
+    console.log('Match status:', match.status);
+    console.log('P&B status:', match.pickAndBan?.status);
+    
+    // Déterminer l'équipe de l'utilisateur
+    const team1Id = match.team1?.teamId?._id || match.team1?.teamId;
+    const team2Id = match.team2?.teamId?._id || match.team2?.teamId;
+    const team1CaptainId = match.team1?.teamId?.captainId?._id || match.team1?.teamId?.captainId;
+    const team2CaptainId = match.team2?.teamId?.captainId?._id || match.team2?.teamId?.captainId;
+    
+    let userTeamId = null;
+    if (team1CaptainId?.toString() === user._id?.toString()) {
+      userTeamId = team1Id;
+    } else if (team2CaptainId?.toString() === user._id?.toString()) {
+      userTeamId = team2Id;
+    }
+    
+    setPickBanModal({ isOpen: true, match, userTeamId });
   };
 
   const handlePlayerSelectionClose = () => {
@@ -94,13 +153,42 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
   };
 
   const handlePickBanClose = () => {
-    setPickBanModal({ isOpen: false, match: null });
+    setPickBanModal({ isOpen: false, match: null, userTeamId: null });
   };
 
-  const handlePickBanSuccess = () => {
-    toast.success('Pick & Ban complété avec succès');
-    handlePickBanClose();
-    loadMatches(); // Rafraîchir les données
+  const handlePickBanSuccess = async (updatedMatch) => {
+    console.log('🎉 Pick & Ban success, updating match:', updatedMatch);
+    
+    // Update the match in pickBanModal to ensure mapPool is available
+    if (updatedMatch) {
+      // 🎯 Fetch the full match to ensure mapPoolId is properly populated
+      try {
+        console.log('📥 Fetching full match data to get populated mapPoolId...');
+        const response = await matchService.getMatch(updatedMatch._id);
+        const fullMatch = response.match || response;  // Handle both formats
+        console.log('✅ Full match fetched:', fullMatch);
+        
+        if (fullMatch) {
+          setPickBanModal(prev => ({
+            ...prev,
+            match: fullMatch
+          }));
+          
+          // Also update in the matches list
+          setMatches(prev => prev.map(m => m._id === updatedMatch._id ? fullMatch : m));
+        }
+      } catch (error) {
+        console.error('❌ Error fetching full match:', error);
+        // Fallback to updatedMatch if fetch fails
+        setPickBanModal(prev => ({
+          ...prev,
+          match: updatedMatch
+        }));
+      }
+    }
+    
+    toast.success('Pick & Ban démarré avec succès');
+    // Don't close - keep modal open so user can see the P&B interface
   };
 
   const filteredMatches = filterStatus === 'all'
@@ -171,16 +259,21 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
           {filteredMatches.length > 0 ? (
             filteredMatches.map((match, index) => {
               const status = getMatchStatus(match);
-              const isComplete = isMatchComplete(
-                match.team1?.score || 0,
-                match.team2?.score || 0,
-                match.matchFormat
-              );
-              const winner = getWinner(
-                match.team1?.score || 0,
-                match.team2?.score || 0,
-                match.matchFormat
-              );
+              const isComplete = match.status === 'completed' || !!match.winner;
+              
+              // Use the stored winner from the match instead of calculating from scores
+              // This handles cases where scores are actual game scores (e.g., 5-3) not Best-of format
+              let winner = null;
+              if (isComplete && match.winner) {
+                // match.winner could be either an ID string or a populated object with _id
+                const winnerId = typeof match.winner === 'object' 
+                  ? match.winner._id?.toString() 
+                  : match.winner.toString();
+                
+                const team1Id = match.team1?.teamId?._id?.toString();
+                
+                winner = winnerId === team1Id ? 'team1' : 'team2';
+              }
 
               return (
                 <motion.div
@@ -203,9 +296,17 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
                           <p className="font-semibold text-white truncate group-hover:text-purple-300 transition-colors">
                             {match.team1?.teamId?.name || 'Équipe 1'}
                           </p>
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-slate-400 mb-2">
                             {match.team1?.teamId?.players?.length || 0} joueurs
                           </p>
+                          {/* 🎯 Team State Badge */}
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className={`inline-block px-2 py-1 text-xs rounded border ${getTeamState(match, 1).color} font-medium`}
+                          >
+                            {getTeamState(match, 1).label}
+                          </motion.div>
                         </div>
 
                         {/* Score */}
@@ -240,9 +341,17 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
                           <p className="font-semibold text-white truncate group-hover:text-purple-300 transition-colors">
                             {match.team2?.teamId?.name || 'Équipe 2'}
                           </p>
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-slate-400 mb-2">
                             {match.team2?.teamId?.players?.length || 0} joueurs
                           </p>
+                          {/* 🎯 Team State Badge */}
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className={`inline-block px-2 py-1 text-xs rounded border ${getTeamState(match, 2).color} font-medium`}
+                          >
+                            {getTeamState(match, 2).label}
+                          </motion.div>
                         </div>
                       </div>
                     </div>
@@ -279,26 +388,46 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
 
                   {/* Pick & Ban Status */}
                   {match.pickAndBan && (
-                    <div className="mt-3 pt-3 border-t border-slate-700 flex items-center gap-2">
-                      <div className="text-xs text-slate-400">
-                        Pick & Ban: 
-                        <span className={`ml-2 font-semibold ${
-                          match.pickAndBan.status === 'completed'
-                            ? 'text-green-400'
-                            : match.pickAndBan.status === 'in-progress'
-                            ? 'text-yellow-400'
-                            : 'text-slate-400'
-                        }`}>
-                          {match.pickAndBan.status === 'completed' && '✓ Fait'}
-                          {match.pickAndBan.status === 'in-progress' && '⏳ En cours'}
-                          {match.pickAndBan.status === 'not-started' && '○ Non commencé'}
-                        </span>
-                      </div>
-                      {match.pickAndBan.selectedMaps && match.pickAndBan.selectedMaps.length > 0 && (
-                        <div className="text-xs text-slate-500">
-                          • {match.pickAndBan.selectedMaps.length} map(s) sélectionnée(s)
+                    <div className="mt-3 pt-3 border-t border-slate-700">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-slate-400">
+                            Pick & Ban: 
+                            <span className={`ml-2 font-semibold ${
+                              match.pickAndBan.status === 'completed'
+                                ? 'text-green-400'
+                                : match.pickAndBan.status === 'in-progress'
+                                ? 'text-yellow-400'
+                                : 'text-slate-400'
+                            }`}>
+                              {match.pickAndBan.status === 'completed' && '✓ Fait'}
+                              {match.pickAndBan.status === 'in-progress' && '⏳ En cours'}
+                              {match.pickAndBan.status === 'not-started' && '○ Non commencé'}
+                            </span>
+                          </div>
+                          {match.pickAndBan.selectedMaps && match.pickAndBan.selectedMaps.length > 0 && (
+                            <div className="text-xs text-slate-500">
+                              • {match.pickAndBan.selectedMaps.length} map(s) sélectionnée(s)
+                            </div>
+                          )}
                         </div>
-                      )}
+                        
+                        {/* 🎯 Start Pick & Ban Button */}
+                        {match.pickAndBan.status === 'not-started' && 
+                         match.team1?.selectedPlayers?.length > 0 && 
+                         match.team2?.selectedPlayers?.length > 0 &&
+                         (isCaptainOfTeam(match, match.team1?.teamId?._id) || isCaptainOfTeam(match, match.team2?.teamId?._id)) && (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => openPickBan(match, e)}
+                            className="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors flex items-center gap-1"
+                          >
+                            <Play size={14} />
+                            Commencer
+                          </motion.button>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -381,9 +510,9 @@ const TournamentMatches = ({ tournamentId, currentUser = null, canEdit = false }
             </div>
             <MatchPickAndBan
               match={pickBanModal.match}
-              mapPool={pickBanModal.match.tournament?.mapPoolId}
-              isTeamCaptain={isCaptainOfTeam(pickBanModal.match, pickBanModal.match.team1Id?._id)}
-              teamId={pickBanModal.match.team1Id?._id}
+              mapPool={pickBanModal.match?.mapPoolId}
+              isTeamCaptain={true}
+              teamId={pickBanModal.userTeamId}
               onComplete={handlePickBanSuccess}
             />
           </motion.div>

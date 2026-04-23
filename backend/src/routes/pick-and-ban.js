@@ -9,6 +9,7 @@ router.get('/:matchId', pickAndBanController.getPickAndBanStatus);
 
 // Protected routes
 router.post('/:matchId/start', protect, pickAndBanController.startPickAndBan);
+router.post('/:matchId/select-side', protect, pickAndBanController.selectSide);
 router.post('/:matchId/pick', protect, pickAndBanController.pickMap);
 router.post('/:matchId/ban', protect, pickAndBanController.banMap);
 

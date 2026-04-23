@@ -49,6 +49,12 @@ export const matchService = {
       selectedPlayers
     });
     return response.data;
+  },
+
+  // Confirm match ready and transition to ongoing
+  confirmMatchReady: async (matchId) => {
+    const response = await api.put(`/matches/${matchId}/confirm-ready`);
+    return response.data;
   }
 };
 
