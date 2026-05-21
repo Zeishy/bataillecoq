@@ -31,7 +31,18 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 1000, // limit each IP to 1000 requests per 15 minutes (66 req/min)
+  message: 'Trop de requêtes, veuillez réessayer plus tard',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Skip rate limiting for certain endpoints
+  skip: (req) => {
+    // Skip socket.io polling
+    if (req.path === '/socket.io/') return true;
+    // Skip health checks
+    if (req.path === '/health') return true;
+    return false;
+  }
 });
 app.use('/api/', limiter);
 

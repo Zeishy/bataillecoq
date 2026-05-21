@@ -37,13 +37,7 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
       teamId
     });
     
-    // 🎯 If match is 'ready' and we haven't tried to confirm yet, confirm it
-    // Use ref to prevent double-calls even if component re-mounts (React StrictMode, etc)
-    if (match.status === 'ongoing' && match.pickAndBan.status === 'not-started' && !confirmationAttempted.current) {
-      console.log('⚙️ Match is ongoing, automatically starting P&B...');
-      confirmationAttempted.current = true;  // 🎯 Mark as attempted
-      handleStartPickAndBan();
-    }
+    confirmationAttempted.current = false;
   }, []);
 
   // 🎯 Update pickAndBan when match changes
@@ -150,6 +144,10 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
       setLoading(true);
       const result = await pickAndBanService.pickMap(match._id, mapName, mode, teamId);
       setPickAndBan(result.match.pickAndBan);
+      setCurrentMatch(result.match);
+      if (result.match.pickAndBan?.status === 'completed' && onComplete) {
+        onComplete(result.match);
+      }
       toast.success('Map pickée!');
     } catch (error) {
       toast.error(error.response?.data?.message || 'Erreur lors du pick');
@@ -158,7 +156,7 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
     }
   };
 
-  const handleBanMap = async (mapName) => {
+  const handleBanMap = async (mapName, mode = null) => {
     if (!isTeamCaptain) {
       toast.error('Seul le capitaine peut bannir');
       return;
@@ -166,8 +164,12 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
 
     try {
       setLoading(true);
-      const result = await pickAndBanService.banMap(match._id, mapName, teamId);
+      const result = await pickAndBanService.banMap(match._id, mapName, mode, teamId);
       setPickAndBan(result.match.pickAndBan);
+      setCurrentMatch(result.match);
+      if (result.match.pickAndBan?.status === 'completed' && onComplete) {
+        onComplete(result.match);
+      }
       toast.success('Map bannite!');
     } catch (error) {
       toast.error(error.response?.data?.message || 'Erreur lors du ban');
@@ -191,6 +193,25 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
   // If maps aren't loaded yet, we'll show empty state in the grid
   const hasMultipleModes = mapPoolData?.modes && mapPoolData.modes.length > 0;
   const mapsToDisplay = hasMultipleModes ? mapPoolData.modes : (mapPoolData?.maps ? [{ name: 'Pool', maps: mapPoolData.maps }] : []);
+  const currentStep = pickAndBan.sequence?.[pickAndBan.currentStepIndex];
+  const getId = (value) => value?._id || value;
+  const activeTurnId = getId(pickAndBan.activeTurn);
+  const team1Id = getId(currentMatch?.team1?.teamId || match?.team1?.teamId);
+  const isMyTurn = activeTurnId
+    ? activeTurnId.toString?.() === teamId?.toString?.()
+    : pickAndBan.status === 'side-selection' && team1Id?.toString?.() === teamId?.toString?.();
+  const canAct = isTeamCaptain && isMyTurn && !loading;
+  const actionLabel = currentStep?.action === 'ban' ? 'Bannir' : 'Picker';
+  const requiredMode = currentStep?.mode || null;
+
+  const handleMapAction = (mapName, mode = null) => {
+    if (!currentStep) return;
+    if (currentStep.action === 'ban') {
+      handleBanMap(mapName, mode);
+    } else if (currentStep.action === 'pick') {
+      handlePickMap(mapName, mode);
+    }
+  };
 
   return (
     <div className="bg-gradient-to-br from-purple-600/10 to-purple-900/10 border border-purple-500/30 rounded-lg p-6">
@@ -200,9 +221,11 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
           <span className={`px-3 py-1 rounded-full text-xs font-bold ${
             pickAndBan.status === 'completed' ? 'bg-green-500/20 text-green-400' :
             pickAndBan.status === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400' :
+            pickAndBan.status === 'side-selection' ? 'bg-blue-500/20 text-blue-300' :
             'bg-gray-500/20 text-gray-400'
           }`}>
             {pickAndBan.status === 'not-started' ? 'Non commencé' :
+             pickAndBan.status === 'side-selection' ? 'Choix du côté' :
              pickAndBan.status === 'in-progress' ? 'En cours' :
              'Terminé'}
           </span>
@@ -220,6 +243,20 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
           <Play size={20} />
           Démarrer le Pick & Ban
         </motion.button>
+      )}
+
+
+
+      {started && pickAndBan.status === 'in-progress' && currentStep && (
+        <div className="mb-6 p-4 bg-slate-800/60 border border-slate-700 rounded-lg">
+          <p className="text-white font-semibold">
+            Tour actuel: {currentStep.action === 'ban' ? 'Ban' : 'Pick'}
+            {requiredMode ? ` - ${requiredMode}` : ''}
+          </p>
+          <p className="text-sm text-slate-400 mt-1">
+            {isMyTurn ? 'C’est à votre équipe de jouer.' : 'En attente de l’autre équipe.'}
+          </p>
+        </div>
       )}
 
       {/* Selected Maps */}
@@ -273,22 +310,27 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
                     <h4 className="text-sm font-bold text-purple-400 mb-2">{mode.name}</h4>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                       {mode.maps && mode.maps.map((map) => {
-                        const isSelected = pickAndBan.selectedMaps.some(m => m.mapName === map.name && m.mode === mode.name);
-                        const isBanned = pickAndBan.bannedMaps.some(m => m.mapName === map.name);
+                      const isSelected = pickAndBan.selectedMaps.some(m => m.mapName === map.name && m.mode === mode.name);
+                      const isBanned = pickAndBan.bannedMaps.some(m => m.mapName === map.name && (!m.mode || m.mode === mode.name));
+                      const wrongMode = requiredMode && requiredMode !== mode.name;
                         
                         return (
                           <motion.button
                             key={map._id}
-                            whileHover={{ scale: isSelected || isBanned ? 1 : 1.05 }}
-                            onClick={() => isTeamCaptain && !isSelected && !isBanned && handlePickMap(map.name, mode.name)}
-                            disabled={isSelected || isBanned || loading}
+                            whileHover={{ scale: isSelected || isBanned || wrongMode ? 1 : 1.05 }}
+                            onClick={() => canAct && !isSelected && !isBanned && !wrongMode && handleMapAction(map.name, mode.name)}
+                            disabled={isSelected || isBanned || wrongMode || !canAct}
                             className={`p-2 rounded-lg font-semibold text-sm transition ${
                               isSelected ? 'bg-green-500/20 border border-green-500 text-green-400' :
                               isBanned ? 'bg-red-500/20 border border-red-500 text-red-400 line-through' :
+                              wrongMode ? 'bg-gray-900 border border-gray-800 text-gray-600 cursor-not-allowed' :
                               'bg-gray-800 border border-gray-700 text-gray-300 hover:border-purple-500'
                             } ${!isTeamCaptain ? 'cursor-not-allowed' : ''}`}
                           >
                             {map.name}
+                            {!isSelected && !isBanned && !wrongMode && isMyTurn && (
+                              <span className="block text-[10px] text-purple-300 mt-1">{actionLabel}</span>
+                            )}
                           </motion.button>
                         );
                       })}
@@ -308,8 +350,8 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
                         <motion.button
                           key={map._id}
                           whileHover={{ scale: isSelected || isBanned ? 1 : 1.05 }}
-                          onClick={() => isTeamCaptain && !isSelected && !isBanned && handlePickMap(map.name)}
-                          disabled={isSelected || isBanned || loading}
+                          onClick={() => canAct && !isSelected && !isBanned && handleMapAction(map.name)}
+                          disabled={isSelected || isBanned || !canAct}
                           className={`p-2 rounded-lg font-semibold text-sm transition ${
                             isSelected ? 'bg-green-500/20 border border-green-500 text-green-400' :
                             isBanned ? 'bg-red-500/20 border border-red-500 text-red-400 line-through' :
@@ -317,6 +359,9 @@ const MatchPickAndBan = ({ match, mapPool, isTeamCaptain, teamId, onComplete }) 
                           } ${!isTeamCaptain ? 'cursor-not-allowed' : ''}`}
                         >
                           {map.name}
+                          {!isSelected && !isBanned && isMyTurn && (
+                            <span className="block text-[10px] text-purple-300 mt-1">{actionLabel}</span>
+                          )}
                         </motion.button>
                       );
                     })}

@@ -65,6 +65,14 @@ const tournamentSchema = new mongoose.Schema({
     enum: ['bo1', 'bo3', 'bo5', 'bo7', 'bo9'],
     default: 'bo5'
   },
+  // Weight system for ladder points calculation
+  weight: {
+    type: Number,
+    default: 1.0,
+    min: 0.5,
+    max: 5.0,
+    description: 'Multiplier for ladder points (1.0 = normal, 2.0 = double points, etc.)'
+  },
   registeredTeams: [{
     teamId: {
       type: mongoose.Schema.Types.ObjectId,

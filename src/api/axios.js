@@ -29,10 +29,11 @@ api.interceptors.response.use(
   (error) => {
     if (error.response) {
       // Le serveur a répondu avec un code d'erreur
-      const { status, data } = error.response;
+      const { status, data, config } = error.response;
       
       // Rediriger vers login si non authentifié
-      if (status === 401) {
+      // MAIS: Ne pas rediriger si c'est la route /auth/login (erreur de credentials)
+      if (status === 401 && config.url && !config.url.includes('/auth/login')) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/login';

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Filter, Users, Calendar, DollarSign, Loader, X } from 'lucide-react';
+import { Trophy, Filter, Users, Calendar, DollarSign, Loader, X, Zap } from 'lucide-react';
 import { tournamentService } from '../services/tournamentService';
 import { useAuth } from '../context/AuthContext';
 import RegisterTournamentModal from '../components/RegisterTournamentModal';
@@ -287,6 +287,10 @@ const Tournaments = () => {
                   <div className="flex items-center text-gray-400">
                     <DollarSign size={16} className="mr-2" />
                     <span className="text-sm">Prize Pool: {tournament.prizePool}€</span>
+                  </div>
+                  <div className="flex items-center text-yellow-400 font-semibold">
+                    <Zap size={16} className="mr-2" />
+                    <span className="text-sm">Weight: {tournament.weight || 1.0}x</span>
                   </div>
                 </div>
                 

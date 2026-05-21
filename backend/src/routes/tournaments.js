@@ -27,6 +27,7 @@ import {
   validateObjectId,
   validate
 } from '../middleware/validation.js';
+import { WEIGHT_PRESETS, getWeightDescription } from '../config/pointsSystem.js';
 
 const router = express.Router();
 
@@ -50,10 +51,27 @@ router.put('/:id', protect, authorize('admin'), validateObjectId('id'), validate
 router.put('/:id/status', protect, authorize('admin'), validateObjectId('id'), validate, updateStatus);
 router.delete('/:id', protect, authorize('admin'), validateObjectId('id'), validate, deleteTournament);
 
+// Team registration routes
 router.post('/:id/register', protect, validateObjectId('id'), validate, isCaptain, registerTeam);
 router.delete('/:id/register/:teamId', protect, validateObjectId('id'), validateObjectId('teamId'), validate, unregisterTeam);
 
 router.post('/:id/teams/:teamId/approve', protect, authorize('admin'), validateObjectId('id'), validateObjectId('teamId'), validate, approveTeam);
 router.post('/:id/teams/:teamId/reject', protect, authorize('admin'), validateObjectId('id'), validateObjectId('teamId'), validate, rejectTeam);
+
+// Weight management routes
+router.patch('/:id/weight', protect, authorize('admin'), validateObjectId('id'), validate, (req, res) => {
+  // This is handled by updateTournament - the PUT route can update weight
+  // This route is just for documentation
+  res.status(405).json({ success: false, message: 'Use PUT /:id to update weight' });
+});
+
+// Get weight presets
+router.get('/meta/weight-presets', (req, res) => {
+  res.status(200).json({
+    success: true,
+    presets: WEIGHT_PRESETS,
+    description: 'Tournament weight multipliers affect ladder points calculation'
+  });
+});
 
 export default router;

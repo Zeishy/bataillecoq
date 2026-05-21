@@ -13,7 +13,8 @@ import {
   Clock,
   TrendingUp,
   Target,
-  UserCheck
+  UserCheck,
+  Zap
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -34,6 +35,7 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
   const [selectedMatchForPlayers, setSelectedMatchForPlayers] = useState(null);
   const [showPlayerSelectionModal, setShowPlayerSelectionModal] = useState(false);
   const [userTeamInTournament, setUserTeamInTournament] = useState(null);
+  const [lastFetchTime, setLastFetchTime] = useState(0);
 
   // Debug user
   useEffect(() => {
@@ -59,14 +61,19 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
 
     socket.on('tournament:updated', (data) => {
       console.log('Real-time update received for tournament:', data);
-      fetchTournamentData();
+      // Debounce: Only fetch if 2+ seconds since last fetch
+      const now = Date.now();
+      if (now - lastFetchTime >= 2000) {
+        setLastFetchTime(now);
+        fetchTournamentData();
+      }
     });
 
     return () => {
       socket.off('tournament:updated');
       socket.emit('tournament:leave', tournamentId);
     };
-  }, [socket, isOpen, tournament?._id]);
+  }, [socket, isOpen, tournament?._id, lastFetchTime]);
 
   const findUserTeamInTournament = (data) => {
     if (!user || !data) return;
@@ -262,6 +269,13 @@ export default function TournamentDetailModal({ isOpen, onClose, tournament, onR
                       <span className="text-xs">Prize Pool</span>
                     </div>
                     <p className="text-reunion-gold font-bold text-sm">{tournament.prizePool}€</p>
+                  </div>
+                  <div className="bg-dark-700 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-gray-400 mb-1">
+                      <Zap className="w-4 h-4" />
+                      <span className="text-xs">Weight Ladder</span>
+                    </div>
+                    <p className="text-yellow-400 font-bold text-sm">{tournament.weight || 1.0}x</p>
                   </div>
                   <div className="bg-dark-700 rounded-lg p-3">
                     <div className="flex items-center gap-2 text-gray-400 mb-1">

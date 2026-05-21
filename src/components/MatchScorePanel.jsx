@@ -9,8 +9,8 @@ import {
 } from '../utils/matchFormat';
 
 const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAdmin = false }) => {
-  const [team1Score, setTeam1Score] = useState(match?.team1Score || 0);
-  const [team2Score, setTeam2Score] = useState(match?.team2Score || 0);
+  const [team1Score, setTeam1Score] = useState(match?.team1?.score || match?.team1Score || 0);
+  const [team2Score, setTeam2Score] = useState(match?.team2?.score || match?.team2Score || 0);
   const [isComplete, setIsComplete] = useState(false);
   const [winner, setWinner] = useState(null);
   const [error, setError] = useState('');
@@ -20,11 +20,13 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
 
   useEffect(() => {
     if (match) {
-      setTeam1Score(match.team1Score || 0);
-      setTeam2Score(match.team2Score || 0);
-      const w = getWinner(match.team1Score || 0, match.team2Score || 0, matchFormat);
+      const nextTeam1Score = match.team1?.score || match.team1Score || 0;
+      const nextTeam2Score = match.team2?.score || match.team2Score || 0;
+      setTeam1Score(nextTeam1Score);
+      setTeam2Score(nextTeam2Score);
+      const w = getWinner(nextTeam1Score, nextTeam2Score, matchFormat);
       setWinner(w);
-      setIsComplete(isMatchComplete(match.team1Score || 0, match.team2Score || 0, matchFormat));
+      setIsComplete(isMatchComplete(nextTeam1Score, nextTeam2Score, matchFormat));
     }
   }, [match, matchFormat]);
 
@@ -49,7 +51,6 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
       return;
     }
 
-    // Update state
     if (team === 'team1') {
       setTeam1Score(newScore);
     } else {
@@ -62,23 +63,36 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
     
     setIsComplete(newIsComplete);
     setWinner(newWinner);
+  };
 
-    // Call parent callback if provided
-    if (onScoreUpdate) {
-      setLoading(true);
-      try {
-        await onScoreUpdate({
-          team1Score: newTeam1,
-          team2Score: newTeam2,
-          status: newIsComplete ? 'completed' : 'in-progress',
-          winner: newWinner
-        });
-      } catch (err) {
-        setError('Erreur lors de la mise à jour du score');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+  const handleForceScore = async () => {
+    setError('');
+
+    if (!isAdmin || !onScoreUpdate) return;
+
+    if (team1Score === team2Score) {
+      setError('Un score forcé doit désigner un gagnant');
+      return;
+    }
+
+    if (!isValidScore(team1Score, team2Score, matchFormat)) {
+      setError(`Combinaison de score invalide pour le format ${matchFormat.toUpperCase()}`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onScoreUpdate({
+        team1Score,
+        team2Score,
+        status: 'completed',
+        winner: team1Score > team2Score ? 'team1' : 'team2'
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Erreur lors du forçage du score');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -150,12 +164,15 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
             )}
           </div>
 
-          <motion.div
-            className="text-4xl font-bold text-center text-white mb-4"
-            whileTap="tap"
-          >
-            {team1Score}
-          </motion.div>
+          <input
+            type="number"
+            min="0"
+            max={maxWins}
+            value={team1Score}
+            onChange={(e) => handleScoreChange('team1', Math.max(0, parseInt(e.target.value, 10) || 0))}
+            disabled={isComplete || loading || !isAdmin}
+            className="w-full text-4xl font-bold text-center text-white mb-4 bg-slate-800/70 border border-slate-600 rounded-lg py-2 disabled:opacity-80"
+          />
 
           {/* Score Controls */}
           <div className="flex gap-2 justify-center">
@@ -206,12 +223,15 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
             )}
           </div>
 
-          <motion.div
-            className="text-4xl font-bold text-center text-white mb-4"
-            whileTap="tap"
-          >
-            {team2Score}
-          </motion.div>
+          <input
+            type="number"
+            min="0"
+            max={maxWins}
+            value={team2Score}
+            onChange={(e) => handleScoreChange('team2', Math.max(0, parseInt(e.target.value, 10) || 0))}
+            disabled={isComplete || loading || !isAdmin}
+            className="w-full text-4xl font-bold text-center text-white mb-4 bg-slate-800/70 border border-slate-600 rounded-lg py-2 disabled:opacity-80"
+          />
 
           {/* Score Controls */}
           <div className="flex gap-2 justify-center">
@@ -265,16 +285,20 @@ const MatchScorePanel = ({ match, team1, team2, matchFormat, onScoreUpdate, isAd
         </div>
       </motion.div>
 
+      {isAdmin && (
+        <button
+          onClick={handleForceScore}
+          disabled={loading || team1Score === team2Score}
+          className="mt-4 w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Enregistrement...' : 'Enregistrer le score et clôturer le match'}
+        </button>
+      )}
+
       {/* Info Text */}
       {!isAdmin && (
         <div className="mt-4 p-3 bg-blue-500/20 border border-blue-500 rounded-lg text-blue-200 text-sm text-center">
           Seuls les administrateurs peuvent modifier les scores
-        </div>
-      )}
-
-      {isAdmin && isComplete && (
-        <div className="mt-4 p-3 bg-purple-500/20 border border-purple-500 rounded-lg text-purple-200 text-sm text-center">
-          🎉 Match terminé! Résultats enregistrés.
         </div>
       )}
     </div>

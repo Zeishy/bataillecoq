@@ -40,10 +40,11 @@ export const pickMap = async (matchId, mapName, mode, teamId) => {
 };
 
 // Ban a map
-export const banMap = async (matchId, mapName, teamId) => {
+export const banMap = async (matchId, mapName, mode, teamId) => {
   try {
     const response = await api.post(`${API_URL}/${matchId}/ban`, {
       mapName,
+      mode,
       teamId
     });
     return response.data;

@@ -51,20 +51,9 @@ export const isValidScore = (team1Score, team2Score, format) => {
     return false;
   }
   
-  // At least one team shouldn't exceed maxWins if match is complete
-  if (team1Score === maxWins || team2Score === maxWins) {
-    // Match is complete, other team must be < maxWins
-    if (team1Score === maxWins && team2Score === maxWins) {
-      return false;
-    }
-  }
-  
-  // Can't have both teams with same score after one reaches maxWins
-  if (team1Score > 0 && team2Score > 0) {
-    const diff = Math.abs(team1Score - team2Score);
-    if (Math.max(team1Score, team2Score) === maxWins && diff !== 1) {
-      return false;
-    }
+  // Both can't be maxWins
+  if (team1Score === maxWins && team2Score === maxWins) {
+    return false;
   }
   
   return true;
@@ -89,14 +78,7 @@ export const getScoreRange = (format) => {
       // Both can't be maxWins
       if (i === maxWins && j === maxWins) continue;
       
-      // If one is maxWins, other must be less and difference must be 1
-      if (i === maxWins) {
-        if (j === maxWins - 1) range.push({ team1: i, team2: j });
-      } else if (j === maxWins) {
-        if (i === maxWins - 1) range.push({ team1: i, team2: j });
-      } else {
-        range.push({ team1: i, team2: j });
-      }
+      range.push({ team1: i, team2: j });
     }
   }
   

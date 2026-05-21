@@ -3,10 +3,71 @@ import Tournament from '../models/Tournament.js';
 import Team from '../models/Team.js';
 import User from '../models/User.js';
 import { getIO } from '../config/socket.js';
+import { awardTournamentLadderPoints } from '../services/tournamentLadderService.js';
+
+const hasSelectedPlayers = (team) => Array.isArray(team?.selectedPlayers) && team.selectedPlayers.length > 0;
+
+const matchRequiresPickAndBan = (match) => Boolean(match?.mapPoolId);
+
+const isPickAndBanCompleted = (match) =>
+  !matchRequiresPickAndBan(match) || match.pickAndBan?.status === 'completed';
+
+const ensureMatchPickAndBanConfig = async (match) => {
+  if (match.mapPoolId && match.matchFormat) return match;
+
+  const tournamentId = match.tournamentId?._id || match.tournamentId;
+  if (!tournamentId) return match;
+
+  const tournament = await Tournament.findById(tournamentId).select('mapPoolId matchFormat finalFormat bracket');
+  if (!tournament) return match;
+
+  if (!match.mapPoolId && tournament.mapPoolId) {
+    match.mapPoolId = tournament.mapPoolId;
+  }
+  const expectedFormat = getMatchFormatForRound(tournament, match.round, match.matchFormat || 'bo3');
+  if (expectedFormat && match.matchFormat !== expectedFormat) {
+    match.matchFormat = expectedFormat;
+  }
+
+  return match;
+};
+
+const validateMatchCanEnterScores = (match) => {
+  if (match.status !== 'ongoing') {
+    return 'Le match doit être en cours avant de pouvoir entrer un score';
+  }
+
+  if (!isPickAndBanCompleted(match)) {
+    return 'Le pick and ban doit être terminé avant de pouvoir entrer un score';
+  }
+
+  return null;
+};
+
+const getMatchFormatForRound = (tournament, round, fallback = 'bo3') => {
+  const totalRounds = tournament?.bracket?.totalRounds;
+  const isFinal = totalRounds && round === totalRounds;
+  return isFinal ? (tournament.finalFormat || tournament.matchFormat || fallback) : (tournament.matchFormat || fallback);
+};
+
+const populateMatchResponse = (query) => query
+  .populate('tournamentId', 'name game format mapPoolId matchFormat finalFormat')
+  .populate('team1.teamId team2.teamId winner', 'name logo captainId')
+  .populate('mapPoolId')
+  .populate({
+    path: 'team1.selectedPlayers team2.selectedPlayers',
+    select: 'userId inGameName games',
+    populate: {
+      path: 'userId',
+      select: 'username avatar'
+    }
+  })
+  .populate('playerStats.playerId', 'username avatar');
 
 // Helper to complete a match and advance the tournament bracket
 const completeMatchAndAdvance = async (match, team1Score, team2Score, winnerId) => {
   try {
+    let shouldAwardLadderPoints = false;
     // Populate necessary fields if not present
     if (!match.tournamentId?._id) {
       await match.populate('tournamentId');
@@ -110,6 +171,8 @@ const completeMatchAndAdvance = async (match, team1Score, team2Score, winnerId) 
                   matchNumber: nextMatch.position,
                   team1: { teamId: nextMatch.team1._id, score: 0 },
                   team2: { teamId: nextMatch.team2._id, score: 0 },
+                  mapPoolId: tournament.mapPoolId || null,
+                  matchFormat: getMatchFormatForRound(tournament, nextRoundNumber, match.matchFormat || 'bo3'),
                   scheduledDate: new Date(Date.now() + 86400000),
                   status: 'pending'
                 });
@@ -129,6 +192,7 @@ const completeMatchAndAdvance = async (match, team1Score, team2Score, winnerId) 
           tournament.winner = winnerId;
           tournament.status = 'completed';
           tournament.manualStatusOverride = true;
+          shouldAwardLadderPoints = true;
         }
       }
     } else {
@@ -168,9 +232,31 @@ const completeMatchAndAdvance = async (match, team1Score, team2Score, winnerId) 
 
     // Sort standings by points (descending)
     tournament.standings.sort((a, b) => (b.points || 0) - (a.points || 0));
+    tournament.standings.forEach((standing, index) => {
+      standing.rank = index + 1;
+    });
+
+    if (tournament.format !== 'single-elimination' && tournament.format !== 'double-elimination') {
+      const remainingMatches = await Match.countDocuments({
+        tournamentId: tournament._id,
+        status: { $ne: 'completed' }
+      });
+
+      if (remainingMatches === 0) {
+        tournament.winner = tournament.standings[0]?.teamId?._id || tournament.standings[0]?.teamId;
+        tournament.status = 'completed';
+        tournament.manualStatusOverride = true;
+        shouldAwardLadderPoints = true;
+      }
+    }
+
     tournament.markModified('standings');
 
     await tournament.save();
+
+    if (shouldAwardLadderPoints) {
+      await awardTournamentLadderPoints(tournament);
+    }
 
     // Emit socket event for real-time updates
     const io = getIO();
@@ -189,17 +275,19 @@ const completeMatchAndAdvance = async (match, team1Score, team2Score, winnerId) 
 // @access  Public
 export const getMatch = async (req, res) => {
   try {
-    const match = await Match.findById(req.params.id)
-      .populate('tournamentId', 'name game format')
-      .populate('team1.teamId team2.teamId winner', 'name logo')
-      .populate('mapPoolId')
-      .populate('playerStats.playerId', 'username avatar');
+    const match = await populateMatchResponse(Match.findById(req.params.id));
 
     if (!match) {
       return res.status(404).json({
         success: false,
         message: 'Match not found'
       });
+    }
+
+    await ensureMatchPickAndBanConfig(match);
+    if (match.isModified('mapPoolId') || match.isModified('matchFormat')) {
+      await match.save();
+      await match.populate('mapPoolId');
     }
 
     res.status(200).json({
@@ -249,6 +337,8 @@ export const createMatch = async (req, res) => {
       tournamentId,
       team1: { teamId: team1Id },
       team2: { teamId: team2Id },
+      mapPoolId: tournament.mapPoolId || null,
+      matchFormat: tournament.matchFormat || 'bo3',
       round,
       scheduledAt
     });
@@ -259,7 +349,7 @@ export const createMatch = async (req, res) => {
 
     const populatedMatch = await Match.findById(match._id)
       .populate('tournamentId', 'name game format')
-      .populate('team1.teamId team2.teamId', 'name logo');
+      .populate('team1.teamId team2.teamId', 'name logo captainId');
 
     res.status(201).json({
       success: true,
@@ -289,6 +379,8 @@ export const updateScore = async (req, res) => {
       });
     }
 
+    await ensureMatchPickAndBanConfig(match);
+
     // Update scores for both teams
     match.team1.score = team1Score;
     match.team2.score = team2Score;
@@ -304,7 +396,7 @@ export const updateScore = async (req, res) => {
 
     const populatedMatch = await Match.findById(match._id)
       .populate('tournamentId', 'name game format')
-      .populate('team1.teamId team2.teamId winner', 'name logo');
+      .populate('team1.teamId team2.teamId winner', 'name logo captainId');
 
     res.status(200).json({
       success: true,
@@ -318,7 +410,7 @@ export const updateScore = async (req, res) => {
   }
 };
 
-// @desc    Confirm match is ready and start ongoing state
+// @desc    Confirm match is ready and start ongoing state after pick and ban
 // @route   PUT /api/matches/:id/confirm-ready
 // @access  Private (Admin or Captain)
 export const confirmMatchReady = async (req, res) => {
@@ -332,9 +424,11 @@ export const confirmMatchReady = async (req, res) => {
       });
     }
 
+    await ensureMatchPickAndBanConfig(match);
+
     // Vérifier que les joueurs sont bien sélectionnés par les 2 équipes
-    const team1HasPlayers = match.team1.selectedPlayers && match.team1.selectedPlayers.length > 0;
-    const team2HasPlayers = match.team2.selectedPlayers && match.team2.selectedPlayers.length > 0;
+    const team1HasPlayers = hasSelectedPlayers(match.team1);
+    const team2HasPlayers = hasSelectedPlayers(match.team2);
 
     if (!team1HasPlayers || !team2HasPlayers) {
       return res.status(400).json({
@@ -351,23 +445,24 @@ export const confirmMatchReady = async (req, res) => {
       });
     }
 
+    if (!isPickAndBanCompleted(match)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le pick and ban doit être terminé avant de démarrer le match',
+        pickAndBanStatus: match.pickAndBan?.status
+      });
+    }
+
     // Mettre à jour le statut à "ongoing"
     match.status = 'ongoing';
     
-    // 🎯 Do NOT auto-start Pick & Ban here
-    // P&B will be started explicitly by calling startPickAndBan endpoint
-    // This allows Pick & Ban to be controlled independently
-    
     await match.save();
 
-    const populatedMatch = await Match.findById(match._id)
-      .populate('tournamentId', 'name game')
-      .populate('team1.teamId team2.teamId', 'name logo')
-      .populate('team1.selectedPlayers team2.selectedPlayers', 'username avatar');
+    const populatedMatch = await populateMatchResponse(Match.findById(match._id));
 
     res.status(200).json({
       success: true,
-      message: 'Match confirmed and is now ongoing',
+      message: 'Match confirmed after pick and ban and is now ongoing',
       match: populatedMatch
     });
   } catch (error) {
@@ -427,7 +522,7 @@ export const completeMatch = async (req, res) => {
 
     const populatedMatch = await Match.findById(match._id)
       .populate('tournamentId', 'name game format')
-      .populate('team1.teamId team2.teamId winner', 'name logo')
+      .populate('team1.teamId team2.teamId winner', 'name logo captainId')
       .populate('playerStats.playerId', 'username avatar');
 
     res.status(200).json({
@@ -488,7 +583,7 @@ export const updateScoreAndAdvance = async (req, res) => {
 
     const match = await Match.findById(req.params.id)
       .populate('tournamentId')
-      .populate('team1.teamId team2.teamId', 'name logo');
+      .populate('team1.teamId team2.teamId', 'name logo captainId');
 
     if (!match) {
       return res.status(404).json({
@@ -503,6 +598,8 @@ export const updateScoreAndAdvance = async (req, res) => {
         message: 'Scores cannot be equal. There must be a winner.'
       });
     }
+
+    await ensureMatchPickAndBanConfig(match);
 
     // Update match and advance bracket
     await completeMatchAndAdvance(match, team1Score, team2Score, winnerId);
@@ -646,6 +743,8 @@ export const selectPlayersForMatch = async (req, res) => {
       });
     }
 
+    await ensureMatchPickAndBanConfig(match);
+
     // Mettre à jour les joueurs sélectionnés
     if (isTeam1) {
       match.team1.selectedPlayers = selectedPlayers;
@@ -662,21 +761,21 @@ export const selectPlayersForMatch = async (req, res) => {
       ? selectedPlayers.length > 0 
       : (match.team2.selectedPlayers && match.team2.selectedPlayers.length > 0);
 
-    if (team1HasSelected && team2HasSelected && (match.status === 'pending' || match.status === 'ready')) {
-      match.status = 'ongoing';
+    if (team1HasSelected && team2HasSelected && match.status === 'pending') {
+      match.status = 'ready';
     }
 
     await match.save();
 
     const populatedMatch = await Match.findById(match._id)
       .populate('tournamentId', 'name game')
-      .populate('team1.teamId team2.teamId', 'name logo')
+      .populate('team1.teamId team2.teamId', 'name logo captainId')
       .populate('team1.selectedPlayers team2.selectedPlayers', 'username avatar');
 
     res.status(200).json({
       success: true,
       message: team1HasSelected && team2HasSelected 
-        ? 'Joueurs sélectionnés avec succès! Le match passe maintenant en cours.'
+        ? 'Joueurs sélectionnés avec succès! Le match est prêt pour le pick and ban.'
         : 'Joueurs sélectionnés avec succès. En attente de l\'autre équipe...',
       match: populatedMatch
     });
@@ -697,15 +796,17 @@ export const getTournamentMatches = async (req, res) => {
     const { tournamentId } = req.params;
 
     const matches = await Match.find({ tournamentId })
-      .populate('tournamentId', 'name game format mapPoolId matchFormat')
+      .populate('tournamentId', 'name game format mapPoolId matchFormat finalFormat')
       .populate('mapPoolId')
-      .populate('team1Id', 'name captainId players')
-      .populate('team2Id', 'name captainId players')
-      .populate('team1Id.captainId', '_id username')
-      .populate('team2Id.captainId', '_id username')
-      .populate('team1Id.players', '_id username role')
-      .populate('team2Id.players', '_id username role')
-      .populate('selectedPlayers', '_id username')
+      .populate('team1.teamId team2.teamId winner', 'name logo captainId players')
+      .populate({
+        path: 'team1.selectedPlayers team2.selectedPlayers',
+        select: 'userId inGameName games',
+        populate: {
+          path: 'userId',
+          select: '_id username avatar'
+        }
+      })
       .sort({ round: 1, createdAt: 1 });
 
     res.status(200).json({
@@ -754,6 +855,18 @@ export const submitScore = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: 'Only team captains can submit scores'
+      });
+    }
+
+    await ensureMatchPickAndBanConfig(match);
+
+    const scoreBlockReason = validateMatchCanEnterScores(match);
+    if (scoreBlockReason) {
+      return res.status(400).json({
+        success: false,
+        message: scoreBlockReason,
+        currentStatus: match.status,
+        pickAndBanStatus: match.pickAndBan?.status
       });
     }
 
@@ -832,8 +945,8 @@ export const approveScore = async (req, res) => {
 
     // Determine winner from submission
     const winnerId = match.scoreSubmission.team1Score > match.scoreSubmission.team2Score
-      ? match.team1.teamId._id
-      : match.team2.teamId._id;
+      ? match.team1.teamId
+      : match.team2.teamId;
 
     // Approve the score submission
     match.scoreSubmission.status = 'approved';
@@ -850,8 +963,8 @@ export const approveScore = async (req, res) => {
 
     // Refetch the match to get the updated data
     const updatedMatch = await Match.findById(req.params.id)
-      .populate('team1.teamId', 'name logo')
-      .populate('team2.teamId', 'name logo')
+      .populate('team1.teamId', 'name logo captainId')
+      .populate('team2.teamId', 'name logo captainId')
       .populate('winner', 'name logo');
 
     res.status(200).json({

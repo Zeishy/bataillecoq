@@ -22,7 +22,8 @@ const matchSchema = new mongoose.Schema({
       default: 0
     },
     selectedPlayers: [{
-      type: mongoose.Schema.Types.ObjectId
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Player'
     }]
   },
   team2: {
@@ -36,7 +37,8 @@ const matchSchema = new mongoose.Schema({
       default: 0
     },
     selectedPlayers: [{
-      type: mongoose.Schema.Types.ObjectId
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Player'
     }]
   },
   // Score Submission and Validation
@@ -88,6 +90,36 @@ const matchSchema = new mongoose.Schema({
       enum: ['not-started', 'side-selection', 'in-progress', 'completed'],
       default: 'not-started'
     },
+    sequence: [{
+      action: {
+        type: String,
+        enum: ['pick', 'ban', 'auto-pick']
+      },
+      mode: String,
+      teamRole: {
+        type: String,
+        enum: ['A', 'B', 'none']
+      }
+    }],
+    currentStepIndex: {
+      type: Number,
+      default: 0
+    },
+    activeTurn: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null
+    },
+    teamA: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null
+    },
+    teamB: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null
+    },
     selectedMaps: [{
       mode: String,               // For multi-mode: "HP", "SND", "Surcharge"
       mapName: String,
@@ -97,6 +129,7 @@ const matchSchema = new mongoose.Schema({
       }
     }],
     bannedMaps: [{
+      mode: String,
       mapName: String,
       bannedBy: {
         type: mongoose.Schema.Types.ObjectId,

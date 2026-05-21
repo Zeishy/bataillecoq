@@ -5,7 +5,8 @@ import Notification from '../models/Notification.model.js';
 import Ladder from '../models/Ladder.js';
 import User from '../models/User.js';
 import Player from '../models/Player.js';
-import { addPointsToLadder } from './ladderController.js';
+import { addPointsToLadder, addPlacementPointsToLadder } from './ladderController.js';
+import { calculateTeamTournamentPoints } from '../services/ladderPointsService.js';
 
 // @desc    Get all tournaments
 // @route   GET /api/tournaments
@@ -116,7 +117,8 @@ export const createTournament = async (req, res) => {
       format,
       mapPoolId,
       matchFormat,
-      finalFormat
+      finalFormat,
+      weight
     } = req.body;
 
     console.log('Creating tournament with:', {
@@ -131,7 +133,8 @@ export const createTournament = async (req, res) => {
       format,
       mapPoolId,
       matchFormat,
-      finalFormat
+      finalFormat,
+      weight
     });
 
     const tournament = await Tournament.create({
@@ -146,7 +149,8 @@ export const createTournament = async (req, res) => {
       format,
       mapPoolId: mapPoolId || null,
       matchFormat: matchFormat || 'bo3',
-      finalFormat: finalFormat || 'bo5'
+      finalFormat: finalFormat || 'bo5',
+      weight: weight || 1.0
     });
 
     res.status(201).json({
@@ -179,7 +183,8 @@ export const updateTournament = async (req, res) => {
       format,
       mapPoolId,
       matchFormat,
-      finalFormat
+      finalFormat,
+      weight
     } = req.body;
 
     const tournament = await Tournament.findById(req.params.id);
@@ -202,6 +207,7 @@ export const updateTournament = async (req, res) => {
     if (mapPoolId !== undefined) tournament.mapPoolId = mapPoolId;
     if (matchFormat) tournament.matchFormat = matchFormat;
     if (finalFormat) tournament.finalFormat = finalFormat;
+    if (weight !== undefined) tournament.weight = weight;
 
     await tournament.save();
 
@@ -300,7 +306,7 @@ export const registerTeam = async (req, res) => {
     // Validation de la sélection de joueurs si fournie
     if (players && Array.isArray(players)) {
       const requiredPlayers = GAME_PLAYER_REQUIREMENTS[tournament.game];
-      
+
       if (!requiredPlayers) {
         return res.status(400).json({
           success: false,
@@ -325,13 +331,13 @@ export const registerTeam = async (req, res) => {
       }
 
       // Vérifier que tous les joueurs appartiennent à l'équipe
-      const teamPlayerIds = team.players.map(p => 
+      const teamPlayerIds = team.players.map(p =>
         (p.playerId?._id || p.playerId?.userId?._id || p.userId?._id || p._id).toString()
       );
-      
+
       const allSelectedPlayers = [...players, ...(substitutes || [])];
       const invalidPlayers = allSelectedPlayers.filter(pid => !teamPlayerIds.includes(pid.toString()));
-      
+
       if (invalidPlayers.length > 0) {
         return res.status(400).json({
           success: false,
@@ -490,7 +496,7 @@ export const rejectTeam = async (req, res) => {
     // Remove the team
     const teamId = tournament.registeredTeams[teamIndex].teamId;
     tournament.registeredTeams.splice(teamIndex, 1);
-    
+
     // Also remove from standings
     tournament.standings = tournament.standings.filter(
       s => s.teamId.toString() !== teamId.toString()
@@ -733,7 +739,7 @@ export const generateSchedule = async (req, res) => {
             scheduledDate: new Date(scheduledDate),
             status: 'pending'
           });
-          
+
           await match.save();
           matches.push(match);
           matchNumber++;
@@ -741,7 +747,7 @@ export const generateSchedule = async (req, res) => {
           // Increment scheduled date
           scheduledDate = new Date(
             scheduledDate.getTime() +
-              (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
+            (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
           );
         } else {
           // Odd number of teams: this team gets a bye to the next round
@@ -775,7 +781,7 @@ export const generateSchedule = async (req, res) => {
             // Increment scheduled date
             scheduledDate = new Date(
               scheduledDate.getTime() +
-                (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
+              (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
             );
 
             round = Math.ceil(matchNumber / Math.floor(teams.length / 2));
@@ -799,7 +805,7 @@ export const generateSchedule = async (req, res) => {
             scheduledDate: new Date(scheduledDate),
             status: 'pending'
           });
-          
+
           await match.save();
           matches.push(match);
           matchNumber++;
@@ -807,7 +813,7 @@ export const generateSchedule = async (req, res) => {
           // Increment scheduled date
           scheduledDate = new Date(
             scheduledDate.getTime() +
-              (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
+            (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
           );
         }
       }
@@ -839,7 +845,7 @@ export const generateSchedule = async (req, res) => {
 
         for (let i = 0; i < teamsInRound1.length; i += 2) {
           if (i + 1 < teamsInRound1.length) {
-            const dbMatch = matches.find(m => 
+            const dbMatch = matches.find(m =>
               m.team1?.teamId?.toString() === teamsInRound1[i]._id.toString() ||
               m.team2?.teamId?.toString() === teamsInRound1[i]._id.toString()
             );
@@ -885,8 +891,8 @@ export const generateSchedule = async (req, res) => {
               matchId: null,
               round,
               position: i,
-              team1: round === 2 && i < teamsWithByes.length ? 
-                { _id: teamsWithByes[i]._id, name: teamsWithByes[i].name, logo: teamsWithByes[i].logo } : 
+              team1: round === 2 && i < teamsWithByes.length ?
+                { _id: teamsWithByes[i]._id, name: teamsWithByes[i].name, logo: teamsWithByes[i].logo } :
                 { name: 'TBD' },
               team2: { name: 'TBD' },
               winner: null,
@@ -895,10 +901,10 @@ export const generateSchedule = async (req, res) => {
             });
           }
 
-          const roundName = round === numRounds ? 'Final' : 
-                            round === numRounds - 1 ? 'Semi-Finals' :
-                            round === numRounds - 2 ? 'Quarter-Finals' :
-                            `Round of ${Math.pow(2, numRounds - round + 1)}`;
+          const roundName = round === numRounds ? 'Final' :
+            round === numRounds - 1 ? 'Semi-Finals' :
+              round === numRounds - 2 ? 'Quarter-Finals' :
+                `Round of ${Math.pow(2, numRounds - round + 1)}`;
 
           bracket.rounds.push({
             round,
@@ -1007,10 +1013,10 @@ export const generateBracket = async (req, res) => {
     for (let i = 0; i < teamsInRound1.length; i += 2) {
       if (i + 1 < teamsInRound1.length) {
         // Find the match from the database if it exists
-        const dbMatch = tournament.matches.find(m => 
-          m.round === 1 && 
+        const dbMatch = tournament.matches.find(m =>
+          m.round === 1 &&
           (m.team1?.teamId?.toString() === teamsInRound1[i]._id.toString() ||
-           m.team2?.teamId?.toString() === teamsInRound1[i]._id.toString())
+            m.team2?.teamId?.toString() === teamsInRound1[i]._id.toString())
         );
 
         round1Matches.push({
@@ -1054,8 +1060,8 @@ export const generateBracket = async (req, res) => {
           matchId: null,
           round,
           position: i,
-          team1: round === 2 && i < teamsWithByes.length ? 
-            { _id: teamsWithByes[i]._id, name: teamsWithByes[i].name, logo: teamsWithByes[i].logo } : 
+          team1: round === 2 && i < teamsWithByes.length ?
+            { _id: teamsWithByes[i]._id, name: teamsWithByes[i].name, logo: teamsWithByes[i].logo } :
             { name: 'TBD' },
           team2: { name: 'TBD' },
           winner: null,
@@ -1064,10 +1070,10 @@ export const generateBracket = async (req, res) => {
         });
       }
 
-      const roundName = round === numRounds ? 'Final' : 
-                        round === numRounds - 1 ? 'Semi-Finals' :
-                        round === numRounds - 2 ? 'Quarter-Finals' :
-                        `Round of ${Math.pow(2, numRounds - round + 1)}`;
+      const roundName = round === numRounds ? 'Final' :
+        round === numRounds - 1 ? 'Semi-Finals' :
+          round === numRounds - 2 ? 'Quarter-Finals' :
+            `Round of ${Math.pow(2, numRounds - round + 1)}`;
 
       bracket.rounds.push({
         round,
@@ -1164,7 +1170,6 @@ export const startTournament = async (req, res) => {
     // Generate schedule if not already done
     if (!tournament.matches || tournament.matches.length === 0) {
       // Call generateSchedule logic
-      const Match = require('../models/Match.js').default;
       const matches = [];
       const startDate = new Date(tournament.startDate);
       let matchNumber = 1;
@@ -1191,7 +1196,7 @@ export const startTournament = async (req, res) => {
 
           scheduledDate = new Date(
             scheduledDate.getTime() +
-              (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
+            (MATCH_DURATION_MINUTES + MIN_GAP_BETWEEN_MATCHES_MINUTES) * 60000
           );
         }
       }
@@ -1268,10 +1273,10 @@ export const endTournament = async (req, res) => {
     // Update status to completed
     tournament.status = 'completed';
     tournament.manualStatusOverride = true; // Prevent auto-update from dates
-    
+
     // Update tournament standings rankings
     if (tournament.standings && tournament.standings.length > 0) {
-      tournament.updateStandings = function() {
+      tournament.updateStandings = function () {
         this.standings.sort((a, b) => {
           if (b.points !== a.points) return b.points - a.points;
           if (b.wins !== a.wins) return b.wins - a.wins;
@@ -1282,32 +1287,67 @@ export const endTournament = async (req, res) => {
           standing.rank = index + 1;
         });
       };
-      
+
       tournament.updateStandings();
     }
 
     await tournament.save();
 
-    // Update ladder with tournament winner points (10 points per win)
-    if (tournament.winner) {
-      try {
-        const winningTeam = await Team.findById(tournament.winner._id)
-          .populate('players.userId', '_id username')
-          .populate({
-            path: 'players.playerId',
-            select: 'userId',
-            populate: {
-              path: 'userId',
-              select: '_id username'
-            }
+    // Update ladder with tournament placement points based on weight
+    try {
+      const weight = tournament.weight || 1.0;
+      const standings = tournament.standings || [];
+
+      console.log(`🏆 [END_TOURNAMENT] Starting ladder updates`);
+      console.log(`🏆 [END_TOURNAMENT] Weight: ${weight}x, Standings count: ${standings.length}`);
+
+      // For each team in standings
+      for (const standing of standings) {
+        const placement = standing.rank || standings.indexOf(standing) + 1;
+
+        try {
+          console.log(`🏆 [END_TOURNAMENT] Processing standing - teamId: ${standing.teamId}, placement: ${placement}`);
+
+          const team = await Team.findById(standing.teamId)
+            .populate('players.userId', '_id username')
+            .populate({
+              path: 'players.playerId',
+              select: 'userId',
+              populate: {
+                path: 'userId',
+                select: '_id username'
+              }
+            });
+
+          if (!team) {
+            console.warn(`⚠️  [END_TOURNAMENT] Team not found: ${standing.teamId}`);
+            continue;
+          }
+
+          if (!team.players || team.players.length === 0) {
+            console.warn(`⚠️  [END_TOURNAMENT] Team has no players: ${team.name}`);
+            continue;
+          }
+
+          console.log(`✅ [END_TOURNAMENT] Found team: ${team.name} with ${team.players.length} players`);
+
+          // Count matches won by this team
+          const matchesWon = await Match.countDocuments({
+            tournamentId: tournament._id,
+            $or: [
+              { 'team1.teamId': standing.teamId, winner: standing.teamId },
+              { 'team2.teamId': standing.teamId, winner: standing.teamId }
+            ],
+            status: 'completed'
           });
 
-        if (winningTeam && winningTeam.players && winningTeam.players.length > 0) {
-          // Award 10 points to all players in the winning team
-          for (const player of winningTeam.players) {
+          console.log(`� [END_TOURNAMENT] Team ${team.name}: ${matchesWon} matches won`);
+
+          // Award points to each player based on placement AND matches won with weight
+          for (const player of team.players) {
             let userId = null;
 
-            // Multi-level userId resolution (same pattern as fix script)
+            // Multi-level userId resolution
             if (player.userId && player.userId._id) {
               userId = player.userId._id;
             } else if (player.playerId && player.playerId.userId) {
@@ -1321,14 +1361,43 @@ export const endTournament = async (req, res) => {
             }
 
             if (userId) {
-              await addPointsToLadder(userId, 10, `Tournament ${tournament.name} - Victory`);
+              // Calculate points with both placement and matches won
+              const pointsCalculation = calculateTeamTournamentPoints({
+                placement,
+                matchesWon,
+                weight,
+                tournamentName: tournament.name
+              });
+
+              // Add points to ladder with detailed tracking
+              const result = await addPlacementPointsToLadder(
+                userId,
+                placement,
+                weight,
+                tournament.name,
+                tournament._id,
+                matchesWon
+              );
+
+              // Update the result with match win info
+              const finalPointsWithMatches = pointsCalculation.totalPoints;
+              console.log(`✅ [END_TOURNAMENT] ${result.ladderEntry.username}:`);
+              console.log(`   └─ Placement #${placement}: ${pointsCalculation.placementPoints}pts`);
+              console.log(`   └─ Matches Won (${matchesWon}): ${pointsCalculation.matchPoints}pts`);
+              console.log(`   └─ Total: ${finalPointsWithMatches}pts`);
             }
           }
+        } catch (teamError) {
+          console.error(`❌ [END_TOURNAMENT] Error processing team:`, teamError.message);
+          console.error(teamError.stack);
         }
-      } catch (ladderError) {
-        console.error('Error updating ladder:', ladderError);
-        // Don't fail the tournament completion if ladder update fails
       }
+
+      console.log(`🏆 [END_TOURNAMENT] Ladder updates completed`);
+    } catch (ladderError) {
+      console.error('❌ [END_TOURNAMENT] Error updating ladder:', ladderError);
+      console.error(ladderError.stack);
+      // Don't fail the tournament completion if ladder update fails
     }
 
     // Notify all participants of tournament completion
@@ -1410,11 +1479,11 @@ export const resetManualOverride = async (req, res) => {
 
     // Reset manual override
     tournament.manualStatusOverride = false;
-    
+
     // Recalculate status based on dates
     const calculatedStatus = tournament.calculateStatus();
     tournament.status = calculatedStatus;
-    
+
     await tournament.save();
 
     res.status(200).json({

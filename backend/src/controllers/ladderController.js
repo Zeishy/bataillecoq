@@ -3,6 +3,8 @@ import User from '../models/User.js';
 import Tournament from '../models/Tournament.js';
 import Team from '../models/Team.js';
 import Player from '../models/Player.js';
+import { calculateTeamTournamentPoints, createLadderUpdateLog } from '../services/ladderPointsService.js';
+import { calculatePlacementPoints } from '../config/pointsSystem.js';
 
 // @desc    Get all ladder rankings
 // @route   GET /api/ladder
@@ -186,7 +188,7 @@ export const syncLadderWithTournaments = async (req, res) => {
     const completedTournaments = await Tournament.find({
       status: 'completed',
       winner: { $exists: true, $ne: null }
-    }).populate('winner');
+    }).populate('winner').populate('standings.teamId');
 
     console.log(`Found ${completedTournaments.length} completed tournaments`);
 
@@ -201,79 +203,103 @@ export const syncLadderWithTournaments = async (req, res) => {
       }
 
       try {
-        // Get the winning team with properly populated players
-        const winningTeam = await Team.findById(tournament.winner._id)
-          .populate('players.userId', '_id username')
-          .populate({
-            path: 'players.playerId',
-            select: 'userId',
-            populate: {
-              path: 'userId',
-              select: '_id username'
+        const weight = tournament.weight || 1.0;
+        
+        // Get all teams in tournament with standings
+        const standings = tournament.standings || [];
+        
+        // For each standing (ranked team)
+        for (const standing of standings) {
+          const placement = standing.rank || standings.indexOf(standing) + 1;
+          
+          try {
+            // Count matches won by this team in this tournament
+            const Match = (await import('../models/Match.js')).default;
+            const matchesWon = await Match.countDocuments({
+              tournamentId: tournament._id,
+              $or: [
+                { 'team1.teamId': standing.teamId, winner: standing.teamId },
+                { 'team2.teamId': standing.teamId, winner: standing.teamId }
+              ],
+              status: 'completed'
+            });
+
+            // Get the team with properly populated players
+            const team = await Team.findById(standing.teamId)
+              .populate('players.userId', '_id username')
+              .populate({
+                path: 'players.playerId',
+                select: 'userId',
+                populate: {
+                  path: 'userId',
+                  select: '_id username'
+                }
+              });
+
+            if (!team || !team.players || team.players.length === 0) {
+              continue;
             }
-          });
 
-        if (!winningTeam || !winningTeam.players || winningTeam.players.length === 0) {
-          continue;
-        }
+            // Calculate points based on placement, matches won, and weight
+            const pointsData = calculateTeamTournamentPoints({
+              placement,
+              matchesWon,
+              weight,
+              tournamentName: tournament.name
+            });
 
-        // Award points to each player
-        for (const player of winningTeam.players) {
-          let userId = null;
+            console.log(`Team ${team.name}: Placement #${placement}, Matches Won: ${matchesWon}, Weight: ${weight}, Total Points: ${pointsData.totalPoints}`);
 
-          // Multi-level userId resolution (same pattern as fix script)
-          if (player.userId && player.userId._id) {
-            userId = player.userId._id;
-          } else if (player.playerId && player.playerId.userId) {
-            userId = player.playerId.userId;
-          } else if (player.playerId) {
-            const playerDoc = await Player.findById(player.playerId)
-              .populate('userId', '_id username');
-            if (playerDoc && playerDoc.userId) {
-              userId = playerDoc.userId._id;
+            // Award points to each player
+            for (const player of team.players) {
+              let userId = null;
+
+              // Multi-level userId resolution
+              if (player.userId && player.userId._id) {
+                userId = player.userId._id;
+              } else if (player.playerId && player.playerId.userId) {
+                userId = player.playerId.userId;
+              } else if (player.playerId) {
+                const playerDoc = await Player.findById(player.playerId)
+                  .populate('userId', '_id username');
+                if (playerDoc && playerDoc.userId) {
+                  userId = playerDoc.userId._id;
+                }
+              }
+
+              if (!userId) continue;
+
+              // Use the addPlacementPointsToLadder function with match count
+              try {
+                const result = await addPlacementPointsToLadder(
+                  userId,
+                  placement,
+                  weight,
+                  tournament.name,
+                  tournament._id,
+                  matchesWon
+                );
+
+                updateDetails.push({
+                  username: result.ladderEntry.username,
+                  action: ladderEntry ? 'updated' : 'created',
+                  placement,
+                  matchesWon,
+                  weight,
+                  pointsBreakdown: result.pointsBreakdown,
+                  totalPoints: result.pointsBreakdown.totalPoints,
+                  tournament: tournament.name
+                });
+
+                playersUpdated++;
+                totalPointsAdded += result.pointsBreakdown.totalPoints;
+              } catch (error) {
+                console.error(`Error adding points for user ${userId}:`, error);
+              }
             }
+          } catch (error) {
+            console.error(`Error processing team in tournament:`, error);
           }
-
-          if (!userId) continue;
-
-          const user = await User.findById(userId);
-          if (!user) continue;
-
-          let ladderEntry = await Ladder.findOne({ userId });
-
-          if (!ladderEntry) {
-            // Create new ladder entry
-            ladderEntry = new Ladder({
-              userId,
-              username: user.username,
-              points: 10,
-              gamesPlayed: 0,
-              tournamentsWon: 1
-            });
-            updateDetails.push({
-              username: user.username,
-              action: 'created',
-              points: 10,
-              tournament: tournament.name
-            });
-          } else {
-            // Update existing entry
-            ladderEntry.points += 10;
-            ladderEntry.tournamentsWon += 1;
-            updateDetails.push({
-              username: user.username,
-              action: 'updated',
-              points: 10,
-              tournament: tournament.name,
-              totalPoints: ladderEntry.points
-            });
-          }
-
-          ladderEntry.lastUpdated = new Date();
-          await ladderEntry.save();
-
-          playersUpdated++;
-          totalPointsAdded += 10;
         }
       } catch (error) {
         console.error(`Error processing tournament ${tournament.name}:`, error.message);
@@ -310,13 +336,13 @@ export const syncLadderWithTournaments = async (req, res) => {
 // @access  Public (FOR TESTING ONLY - REMOVE IN PRODUCTION)
 export const syncLadderDebug = async (req, res) => {
   try {
-    console.log('🔄 [DEBUG] Starting ladder synchronization...');
+    console.log('🔄 [DEBUG] Starting ladder synchronization with weight consideration...');
 
     // Find all completed tournaments with a winner
     const completedTournaments = await Tournament.find({
       status: 'completed',
       winner: { $exists: true, $ne: null }
-    }).populate('winner');
+    }).populate('winner').populate('standings.teamId');
 
     console.log(`📊 [DEBUG] Found ${completedTournaments.length} completed tournaments`);
 
@@ -334,93 +360,154 @@ export const syncLadderDebug = async (req, res) => {
       }
 
       try {
-        // Get the winning team with properly populated players
-        const winningTeam = await Team.findById(tournament.winner._id)
-          .populate('players.userId', '_id username')
-          .populate({
-            path: 'players.playerId',
-            select: 'userId',
-            populate: {
-              path: 'userId',
-              select: '_id username'
+        const weight = tournament.weight || 1.0;
+        console.log(`⚖️  [DEBUG] Tournament weight: ${weight}x`);
+
+        const standings = tournament.standings || [];
+
+        // For each standing (ranked team)
+        for (const standing of standings) {
+          const placement = standing.rank || standings.indexOf(standing) + 1;
+          
+          try {
+            // Get the team with properly populated players
+            const team = await Team.findById(standing.teamId)
+              .populate('players.userId', '_id username')
+              .populate({
+                path: 'players.playerId',
+                select: 'userId',
+                populate: {
+                  path: 'userId',
+                  select: '_id username'
+                }
+              });
+
+            if (!team || !team.players || team.players.length === 0) {
+              console.log(`⚠️  [DEBUG] No players in team ${standing.teamId}`);
+              continue;
             }
-          });
 
-        if (!winningTeam || !winningTeam.players || winningTeam.players.length === 0) {
-          console.log('⚠️  [DEBUG] No players in winning team');
-          continue;
-        }
+            // Count matches won
+            const matchesWon = await Match.countDocuments({
+              tournamentId: tournament._id,
+              $or: [
+                { 'team1.teamId': standing.teamId, winner: standing.teamId },
+                { 'team2.teamId': standing.teamId, winner: standing.teamId }
+              ],
+              status: 'completed'
+            });
 
-        console.log(`👥 [DEBUG] Winning team: ${winningTeam.name} (${winningTeam.players.length} players)`);
+            // Calculate points based on placement, matches won, and weight
+            const pointsCalculation = calculateTeamTournamentPoints({
+              placement,
+              matchesWon,
+              weight,
+              tournamentName: tournament.name
+            });
 
-        // Award points to each player
-        for (const player of winningTeam.players) {
-          let userId = null;
+            console.log(`👥 [DEBUG] Team: ${team.name}, Placement #${placement}, Matches Won: ${matchesWon}, Points: ${pointsCalculation.totalPoints} (placement: ${pointsCalculation.placementPoints} + matches: ${pointsCalculation.matchPoints})`);
 
-          // Multi-level userId resolution (same pattern as fix script)
-          if (player.userId && player.userId._id) {
-            userId = player.userId._id;
-          } else if (player.playerId && player.playerId.userId) {
-            userId = player.playerId.userId;
-          } else if (player.playerId) {
-            const playerDoc = await Player.findById(player.playerId)
-              .populate('userId', '_id username');
-            if (playerDoc && playerDoc.userId) {
-              userId = playerDoc.userId._id;
+            // Award points to each player
+            for (const player of team.players) {
+              let userId = null;
+
+              // Multi-level userId resolution
+              if (player.userId && player.userId._id) {
+                userId = player.userId._id;
+              } else if (player.playerId && player.playerId.userId) {
+                userId = player.playerId.userId;
+              } else if (player.playerId) {
+                const playerDoc = await Player.findById(player.playerId)
+                  .populate('userId', '_id username');
+                if (playerDoc && playerDoc.userId) {
+                  userId = playerDoc.userId._id;
+                }
+              }
+
+              if (!userId) {
+                console.log(`⚠️  [DEBUG] Could not resolve userId for player`);
+                continue;
+              }
+
+              const user = await User.findById(userId);
+              if (!user) {
+                console.log(`⚠️  [DEBUG] User not found: ${userId}`);
+                continue;
+              }
+
+              let ladderEntry = await Ladder.findOne({ userId });
+
+              if (!ladderEntry) {
+                // Create new ladder entry
+                ladderEntry = new Ladder({
+                  userId,
+                  username: user.username,
+                  points: pointsCalculation.totalPoints,
+                  gamesPlayed: matchesWon,
+                  tournamentsWon: placement === 1 ? 1 : 0,
+                  pointsHistory: [{
+                    tournamentId: tournament._id,
+                    placement,
+                    weight,
+                    matchesWon,
+                    pointsEarned: pointsCalculation.totalPoints,
+                    placementPoints: pointsCalculation.placementPoints,
+                    matchPoints: pointsCalculation.matchPoints,
+                    earnedAt: new Date()
+                  }]
+                });
+                console.log(`✅ [DEBUG] Created ladder entry for ${user.username} with ${pointsCalculation.totalPoints} points`);
+                updateDetails.push({
+                  username: user.username,
+                  action: 'created',
+                  points: pointsCalculation.totalPoints,
+                  placement,
+                  weight,
+                  matchesWon,
+                  tournament: tournament.name
+                });
+              } else {
+                // Update existing entry
+                const oldPoints = ladderEntry.points;
+                ladderEntry.points += pointsCalculation.totalPoints;
+                ladderEntry.gamesPlayed += matchesWon;
+                if (placement === 1) {
+                  ladderEntry.tournamentsWon += 1;
+                }
+                ladderEntry.pointsHistory.push({
+                  tournamentId: tournament._id,
+                  placement,
+                  weight,
+                  matchesWon,
+                  pointsEarned: pointsCalculation.totalPoints,
+                  placementPoints: pointsCalculation.placementPoints,
+                  matchPoints: pointsCalculation.matchPoints,
+                  earnedAt: new Date()
+                });
+                console.log(`✅ [DEBUG] Updated ${user.username}: ${oldPoints} → ${ladderEntry.points} points (${placement === 1 ? 'WINNER' : `#${placement}`}, ${matchesWon} wins)`);
+                updateDetails.push({
+                  username: user.username,
+                  action: 'updated',
+                  oldPoints,
+                  newPoints: ladderEntry.points,
+                  points: pointsCalculation.totalPoints,
+                  placement,
+                  weight,
+                  matchesWon,
+                  tournament: tournament.name,
+                  totalPoints: ladderEntry.points
+                });
+              }
+
+              ladderEntry.lastUpdated = new Date();
+              await ladderEntry.save();
+
+              playersUpdated++;
+              totalPointsAdded += placementPoints;
             }
+          } catch (error) {
+            console.error(`❌ [DEBUG] Error processing team in tournament:`, error.message);
           }
-
-          if (!userId) {
-            console.log(`⚠️  [DEBUG] Could not resolve userId for player`);
-            continue;
-          }
-
-          const user = await User.findById(userId);
-          if (!user) {
-            console.log(`⚠️  [DEBUG] User not found: ${userId}`);
-            continue;
-          }
-
-          let ladderEntry = await Ladder.findOne({ userId });
-
-          if (!ladderEntry) {
-            // Create new ladder entry
-            ladderEntry = new Ladder({
-              userId,
-              username: user.username,
-              points: 10,
-              gamesPlayed: 0,
-              tournamentsWon: 1
-            });
-            console.log(`✅ [DEBUG] Created ladder entry for ${user.username} with 10 points`);
-            updateDetails.push({
-              username: user.username,
-              action: 'created',
-              points: 10,
-              tournament: tournament.name
-            });
-          } else {
-            // Update existing entry
-            const oldPoints = ladderEntry.points;
-            ladderEntry.points += 10;
-            ladderEntry.tournamentsWon += 1;
-            console.log(`✅ [DEBUG] Updated ${user.username}: ${oldPoints} → ${ladderEntry.points} points`);
-            updateDetails.push({
-              username: user.username,
-              action: 'updated',
-              oldPoints,
-              newPoints: ladderEntry.points,
-              points: 10,
-              tournament: tournament.name,
-              totalPoints: ladderEntry.points
-            });
-          }
-
-          ladderEntry.lastUpdated = new Date();
-          await ladderEntry.save();
-
-          playersUpdated++;
-          totalPointsAdded += 10;
         }
       } catch (error) {
         console.error(`❌ [DEBUG] Error processing tournament ${tournament.name}:`, error.message);
@@ -441,7 +528,7 @@ export const syncLadderDebug = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Ladder synchronized successfully (DEBUG MODE)',
+      message: 'Ladder synchronized successfully (DEBUG MODE - with weight)',
       stats: {
         tournamentsProcessed: completedTournaments.length,
         playersUpdated,
@@ -463,3 +550,98 @@ export const syncLadderDebug = async (req, res) => {
     });
   }
 };
+
+// @desc    Add points to ladder based on tournament placement with weight and match wins
+// @route   POST /api/ladder/add-placement-points (internal)
+// @access  Private (used internally)
+export const addPlacementPointsToLadder = async (userId, placement, weight = 1.0, tournamentName = 'Tournament', tournamentId = null, matchesWon = 0) => {
+  try {
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Calculate points: placement + match wins with weight
+    const pointsData = calculateTeamTournamentPoints({
+      placement,
+      matchesWon,
+      weight,
+      tournamentName
+    });
+
+    const totalPoints = pointsData.totalPoints;
+
+    let ladderEntry = await Ladder.findOne({ userId });
+
+    if (!ladderEntry) {
+      // Create new ladder entry
+      ladderEntry = new Ladder({
+        userId,
+        username: user.username,
+        points: totalPoints,
+        gamesPlayed: matchesWon,
+        tournamentsParticipated: 1,
+        tournamentsWon: placement === 1 ? 1 : 0,
+        pointsHistory: [{
+          tournamentId,
+          tournamentName,
+          placement,
+          weight,
+          matchesWon,
+          pointsEarned: totalPoints,
+          placementPoints: pointsData.placementPoints,
+          matchPoints: pointsData.matchPoints,
+          earnedAt: new Date()
+        }]
+      });
+    } else {
+      // Update existing entry
+      ladderEntry.points += totalPoints;
+      ladderEntry.gamesPlayed = (ladderEntry.gamesPlayed || 0) + matchesWon;
+      ladderEntry.tournamentsParticipated = (ladderEntry.tournamentsParticipated || 0) + 1;
+      if (placement === 1) {
+        ladderEntry.tournamentsWon += 1;
+      }
+      
+      // Add to history with detailed breakdown
+      if (!ladderEntry.pointsHistory) {
+        ladderEntry.pointsHistory = [];
+      }
+      ladderEntry.pointsHistory.push({
+        tournamentId,
+        tournamentName,
+        placement,
+        weight,
+        matchesWon,
+        pointsEarned: totalPoints,
+        placementPoints: pointsData.placementPoints,
+        matchPoints: pointsData.matchPoints,
+        earnedAt: new Date()
+      });
+    }
+
+    ladderEntry.lastUpdated = new Date();
+    await ladderEntry.save();
+
+    return {
+      ladderEntry,
+      pointsAwarded: totalPoints,
+      pointsBreakdown: {
+        placement,
+        matchesWon,
+        weight,
+        placementPoints: pointsData.placementPoints,
+        matchPoints: pointsData.matchPoints,
+        totalPoints
+      },
+      placement,
+      weight,
+      tournament: tournamentName
+    };
+  } catch (error) {
+    console.error('Add placement points to ladder error:', error);
+    throw error;
+  }
+};
+

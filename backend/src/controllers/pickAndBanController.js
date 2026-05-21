@@ -2,9 +2,60 @@ import Match from '../models/Match.js';
 import MapPool from '../models/MapPool.js';
 import Tournament from '../models/Tournament.js';
 
+const hasSelectedPlayers = (team) => Array.isArray(team?.selectedPlayers) && team.selectedPlayers.length > 0;
+
+const getMatchFormatForRound = (tournament, round, fallback = 'bo3') => {
+  const totalRounds = tournament?.bracket?.totalRounds;
+  const isFinal = totalRounds && round === totalRounds;
+  return isFinal ? (tournament.finalFormat || tournament.matchFormat || fallback) : (tournament.matchFormat || fallback);
+};
+
+const ensureMatchPickAndBanConfig = async (match) => {
+  if (match.mapPoolId && match.matchFormat) return match;
+
+  const tournamentId = match.tournamentId?._id || match.tournamentId;
+  if (!tournamentId) return match;
+
+  const tournament = await Tournament.findById(tournamentId).select('mapPoolId matchFormat finalFormat bracket');
+  if (!tournament) return match;
+
+  if (!match.mapPoolId && tournament.mapPoolId) {
+    match.mapPoolId = tournament.mapPoolId;
+  }
+  const expectedFormat = getMatchFormatForRound(tournament, match.round, match.matchFormat || 'bo3');
+  if (expectedFormat && match.matchFormat !== expectedFormat) {
+    match.matchFormat = expectedFormat;
+  }
+
+  return match;
+};
+
 // Helper to generate the Pick and Ban sequence
 const generateSequence = (matchFormat, modes) => {
   const hasModes = modes && modes.length > 0;
+  const buildGenericBestOfSequence = (bestOf, mode = null) => {
+    if (bestOf <= 1) {
+      return [
+        { action: 'ban', mode, teamRole: 'A' },
+        { action: 'ban', mode, teamRole: 'B' },
+        { action: 'ban', mode, teamRole: 'A' },
+        { action: 'ban', mode, teamRole: 'B' },
+        { action: 'auto-pick', mode, teamRole: 'none' }
+      ];
+    }
+
+    const sequence = [
+      { action: 'ban', mode, teamRole: 'A' },
+      { action: 'ban', mode, teamRole: 'B' }
+    ];
+
+    for (let i = 0; i < bestOf - 1; i += 1) {
+      sequence.push({ action: 'pick', mode, teamRole: i % 2 === 0 ? 'A' : 'B' });
+    }
+
+    sequence.push({ action: 'auto-pick', mode, teamRole: 'none' });
+    return sequence;
+  };
   
   if (hasModes) {
     // Call of Duty formats (assumes modes are HP, SND, Surcharge or similar)
@@ -39,6 +90,11 @@ const generateSequence = (matchFormat, modes) => {
         { action: 'auto-pick', mode: controlMode, teamRole: 'none' }
       ];
     }
+
+    const bestOf = Number.parseInt(matchFormat?.replace('bo', ''), 10);
+    if (bestOf > 0) {
+      return buildGenericBestOfSequence(bestOf);
+    }
   }
   
   // Generic single-mode formats
@@ -61,13 +117,12 @@ const generateSequence = (matchFormat, modes) => {
       { action: 'auto-pick', mode: null, teamRole: 'none' }
     ];
   } else if (matchFormat === 'bo1') {
-    return [
-      { action: 'ban', mode: null, teamRole: 'A' },
-      { action: 'ban', mode: null, teamRole: 'B' },
-      { action: 'ban', mode: null, teamRole: 'A' },
-      { action: 'ban', mode: null, teamRole: 'B' },
-      { action: 'auto-pick', mode: null, teamRole: 'none' }
-    ];
+    return buildGenericBestOfSequence(1);
+  }
+
+  const bestOf = Number.parseInt(matchFormat?.replace('bo', ''), 10);
+  if (bestOf > 1) {
+    return buildGenericBestOfSequence(bestOf);
   }
   
   return [];
@@ -83,35 +138,50 @@ const advanceSequence = async (match) => {
     match.pickAndBan.status = 'completed';
     match.pickAndBan.completedAt = new Date();
     match.pickAndBan.activeTurn = null;
+    match.status = 'ongoing';
+    return;
+  }
+
+  // Find remaining maps for the nextStep mode/pool
+  const pool = await MapPool.findById(match.mapPoolId);
+  if (!pool) {
+    match.pickAndBan.status = 'completed';
+    match.pickAndBan.completedAt = new Date();
+    match.pickAndBan.activeTurn = null;
+    match.status = 'ongoing';
+    return;
+  }
+
+  const mode = nextStep.mode;
+  let availableMaps = [];
+  if (pool.modes && pool.modes.length > 0) {
+    if (mode) {
+      const modeData = pool.modes.find(m => m.name === mode);
+      if (modeData) availableMaps = modeData.maps || [];
+    } else {
+      availableMaps = pool.modes.reduce((acc, m) => acc.concat(m.maps || []), []);
+    }
+  } else {
+    availableMaps = pool.maps || [];
+  }
+
+  // Filter out already picked or banned maps
+  const pickedNames = match.pickAndBan.selectedMaps.filter(m => !mode || m.mode === mode).map(m => m.mapName);
+  const bannedNames = match.pickAndBan.bannedMaps.map(m => m.mapName);
+  const remainingMaps = availableMaps.filter(m => !pickedNames.includes(m.name) && !bannedNames.includes(m.name));
+
+  if (remainingMaps.length === 0) {
+    // No maps available for this step, so skip it and advance sequence
+    await advanceSequence(match);
     return;
   }
   
   if (nextStep.action === 'auto-pick') {
-    // Find remaining map for the required mode
-    const mode = nextStep.mode;
-    const pool = await MapPool.findById(match.mapPoolId);
-    
-    let availableMaps = [];
-    if (pool.modes && pool.modes.length > 0) {
-      const modeData = pool.modes.find(m => m.name === mode);
-      if (modeData) availableMaps = modeData.maps;
-    } else {
-      availableMaps = pool.maps;
-    }
-    
-    // Filter out already picked or banned maps
-    const pickedNames = match.pickAndBan.selectedMaps.filter(m => !mode || m.mode === mode).map(m => m.mapName);
-    const bannedNames = match.pickAndBan.bannedMaps.map(m => m.mapName);
-    
-    const remainingMaps = availableMaps.filter(m => !pickedNames.includes(m.name) && !bannedNames.includes(m.name));
-    
-    if (remainingMaps.length > 0) {
-      match.pickAndBan.selectedMaps.push({
-        mode: mode,
-        mapName: remainingMaps[0].name, // Auto-pick the last remaining
-        pickedBy: null
-      });
-    }
+    match.pickAndBan.selectedMaps.push({
+      mode: mode,
+      mapName: remainingMaps[0].name, // Auto-pick the last remaining
+      pickedBy: null
+    });
     
     // Advance again in case there are multiple auto-picks or sequence ends
     await advanceSequence(match);
@@ -138,27 +208,57 @@ export const startPickAndBan = async (req, res) => {
     if (match.pickAndBan.status !== 'not-started') {
       return res.status(400).json({ success: false, message: 'Pick and ban already started or completed' });
     }
+
+    await ensureMatchPickAndBanConfig(match);
+    if (!match.mapPoolId) {
+      return res.status(400).json({ success: false, message: 'Aucun pool de maps n’est configuré pour ce match' });
+    }
+
+    if (match.status !== 'ready') {
+      return res.status(400).json({
+        success: false,
+        message: 'Les deux équipes doivent sélectionner leurs joueurs avant de démarrer le pick and ban',
+        currentStatus: match.status
+      });
+    }
+
+    if (!hasSelectedPlayers(match.team1) || !hasSelectedPlayers(match.team2)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Les deux équipes doivent sélectionner leurs joueurs avant de démarrer le pick and ban'
+      });
+    }
     
     // Generate sequence
-    const sequence = generateSequence(match.matchFormat || 'bo3', match.mapPoolId?.modes);
+    const mapPool = match.mapPoolId?.modes ? match.mapPoolId : await MapPool.findById(match.mapPoolId);
+    const sequence = generateSequence(match.matchFormat || 'bo3', mapPool?.modes);
     
     match.pickAndBan.sequence = sequence;
     match.pickAndBan.currentStepIndex = 0;
     
     if (sequence.length > 0) {
-      // Transition to side-selection phase, where Team 1 chooses to be A or B
-      match.pickAndBan.status = 'side-selection';
-      match.pickAndBan.activeTurn = match.team1.teamId; // Team 1 gets to pick side
-    } else {
-      // Fallback if no sequence is generated
+      // ✅ Automatically assign Team A and B (always: team1 = A, team2 = B)
+      match.pickAndBan.teamA = match.team1.teamId;
+      match.pickAndBan.teamB = match.team2.teamId;
+      
+      // ✅ Skip side-selection and go directly to in-progress
       match.pickAndBan.status = 'in-progress';
+      
+      // Set first turn (Team A starts with first action)
+      const firstStep = sequence[0];
+      match.pickAndBan.activeTurn = firstStep.teamRole === 'A' ? match.pickAndBan.teamA : match.pickAndBan.teamB;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: `Aucune séquence de pick and ban disponible pour le format ${match.matchFormat}`
+      });
     }
     
     await match.save();
     
     res.status(200).json({
       success: true,
-      message: 'Pick and ban initialized. Team 1 must select side.',
+      message: 'Pick and ban started directly. Team A (team1) vs Team B (team2).',
       match
     });
   } catch (error) {
@@ -186,8 +286,15 @@ export const selectSide = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Not in side selection phase' });
     }
     
-    if (match.pickAndBan.activeTurn.toString() !== teamId.toString()) {
+    const activeTurnId = match.pickAndBan.activeTurn?.toString();
+    const team1Id = match.team1.teamId.toString();
+
+    if (activeTurnId && activeTurnId !== teamId.toString()) {
       return res.status(403).json({ success: false, message: 'It is not your turn to select side' });
+    }
+
+    if (!activeTurnId && team1Id !== teamId.toString()) {
+      return res.status(403).json({ success: false, message: 'Team 1 must select the side' });
     }
     
     const otherTeamId = match.team1.teamId.toString() === teamId.toString() 
@@ -203,14 +310,8 @@ export const selectSide = async (req, res) => {
     }
     
     match.pickAndBan.status = 'in-progress';
-    
-    // Set active turn for first step
-    const firstStep = match.pickAndBan.sequence[0];
-    if (firstStep) {
-      match.pickAndBan.activeTurn = firstStep.teamRole === 'A' ? match.pickAndBan.teamA : match.pickAndBan.teamB;
-    } else {
-      match.pickAndBan.status = 'completed';
-    }
+    match.pickAndBan.currentStepIndex = -1;
+    await advanceSequence(match);
     
     await match.save();
     
@@ -313,7 +414,7 @@ export const banMap = async (req, res) => {
       return res.status(400).json({ success: false, message: 'This map is already picked or banned' });
     }
     
-    match.pickAndBan.bannedMaps.push({ mapName, bannedBy: teamId });
+    match.pickAndBan.bannedMaps.push({ mode: mode || null, mapName, bannedBy: teamId });
     
     // Advance sequence
     if (currentStep) {
@@ -338,6 +439,8 @@ export const completePickAndBan = async (req, res) => {
     
     match.pickAndBan.status = 'completed';
     match.pickAndBan.completedAt = new Date();
+    match.pickAndBan.activeTurn = null;
+    match.status = 'ongoing';
     
     await match.save();
     res.status(200).json({ success: true, message: 'Pick and ban completed', match });

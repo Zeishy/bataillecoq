@@ -40,11 +40,11 @@ const MatchDetail = () => {
       // Load teams
       if (matchData.team1?.teamId) {
         const t1 = await teamService.getTeam(matchData.team1.teamId._id || matchData.team1.teamId);
-        setTeam1(t1);
+        setTeam1(t1.team || t1);
       }
       if (matchData.team2?.teamId) {
         const t2 = await teamService.getTeam(matchData.team2.teamId._id || matchData.team2.teamId);
-        setTeam2(t2);
+        setTeam2(t2.team || t2);
       }
 
       setError('');
@@ -58,12 +58,18 @@ const MatchDetail = () => {
 
   const handleScoreUpdate = async (scoreData) => {
     try {
-      const updated = await matchService.updateScore(
-        matchId,
-        scoreData.team1Score,
-        scoreData.team2Score
-      );
-      setMatch(updated);
+      const winnerId = scoreData.winner === 'team1'
+        ? (match.team1?.teamId?._id || match.team1?.teamId)
+        : (match.team2?.teamId?._id || match.team2?.teamId);
+
+      await matchService.updateScoreAndAdvance(matchId, {
+        team1Score: scoreData.team1Score,
+        team2Score: scoreData.team2Score,
+        winnerId
+      });
+
+      await loadMatchData();
+      toast.success('Score forcé et tournoi mis à jour');
     } catch (err) {
       console.error('Error updating score:', err);
       throw err;
@@ -102,16 +108,19 @@ const MatchDetail = () => {
 
     const team1Data = match.team1?.teamId;
     const team2Data = match.team2?.teamId;
+    const loadedTeam1 = team1?.team || team1;
+    const loadedTeam2 = team2?.team || team2;
     
     const team1Id = team1Data?._id || team1Data;
     const team2Id = team2Data?._id || team2Data;
     
-    const team1CaptainId = team1Data?.captainId?._id || team1Data?.captainId;
-    const team2CaptainId = team2Data?.captainId?._id || team2Data?.captainId;
+    const team1CaptainId = team1Data?.captainId?._id || team1Data?.captainId || loadedTeam1?.captainId?._id || loadedTeam1?.captainId;
+    const team2CaptainId = team2Data?.captainId?._id || team2Data?.captainId || loadedTeam2?.captainId?._id || loadedTeam2?.captainId;
+    const userId = user._id || user.id;
 
-    if (team1CaptainId?.toString() === user._id?.toString()) {
+    if (team1CaptainId?.toString() === userId?.toString()) {
       return team1Id;
-    } else if (team2CaptainId?.toString() === user._id?.toString()) {
+    } else if (team2CaptainId?.toString() === userId?.toString()) {
       return team2Id;
     }
 
@@ -120,6 +129,16 @@ const MatchDetail = () => {
 
   const userTeamId = determineUserTeam();
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const getId = (value) => (value?._id || value)?.toString?.();
+  const getPlayerName = (player, fallback = 'Joueur') =>
+    player?.userId?.username || player?.username || player?.inGameName || fallback;
+  const getPickingTeamName = (map) => {
+    const pickedById = getId(map?.pickedBy);
+    if (!pickedById) return 'auto';
+    if (pickedById === getId(match.team1?.teamId)) return team1?.name || match.team1?.teamId?.name || 'Équipe 1';
+    if (pickedById === getId(match.team2?.teamId)) return team2?.name || match.team2?.teamId?.name || 'Équipe 2';
+    return 'équipe inconnue';
+  };
 
   if (loading) {
     return (
@@ -153,13 +172,15 @@ const MatchDetail = () => {
   // Use stored winner instead of calculating from scores (scores may be actual game scores, not Best-of format)
   let matchWinner = null;
   if (isComplete && match?.winner) {
-    matchWinner = match.winner.toString() === match.team1?.teamId?._id?.toString() || match.winner.toString() === match.team1?.teamId
+    matchWinner = getId(match.winner) === getId(match.team1?.teamId)
       ? 'team1'
       : 'team2';
   }
   
-  const isMatchOngoing = match?.status?.toLowerCase().trim() !== 'completed' && 
-                         match?.status?.toLowerCase().trim() !== 'cancelled';
+  const matchStatus = match?.status?.toLowerCase().trim();
+  const pickAndBanStatus = match?.pickAndBan?.status;
+  const requiresPickAndBan = !!(match?.mapPoolId?._id || match?.mapPoolId);
+  const canEnterScores = matchStatus === 'ongoing' && (!requiresPickAndBan || pickAndBanStatus === 'completed');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white py-8 px-4">
@@ -209,8 +230,10 @@ const MatchDetail = () => {
                 <div className="text-slate-500 text-xs">
                   {match.status?.toLowerCase().trim() === 'completed' || isComplete ? (
                     <span className="text-green-400 font-bold">✓ MATCH TERMINÉ</span>
-                  ) : (match.status?.toLowerCase().trim() === 'ongoing' || match.status?.toLowerCase().trim() === 'ready' || match.pickAndBan?.status !== 'not-started') ? (
+                  ) : matchStatus === 'ongoing' ? (
                     <span className="text-blue-400 font-bold">● EN COURS</span>
+                  ) : matchStatus === 'ready' ? (
+                    <span className="text-amber-300 font-bold">● PICK & BAN</span>
                   ) : (
                     <span className="text-yellow-400 font-bold">● EN ATTENTE</span>
                   )}
@@ -235,7 +258,7 @@ const MatchDetail = () => {
           </div>
         </motion.div>
 
-        {/* Ready Confirmation Button */}
+        {/* Ready Pick & Ban Prompt */}
         {match?.status === 'ready' && userTeamId && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -247,11 +270,11 @@ const MatchDetail = () => {
                 <div className="text-2xl">⏳</div>
                 <div>
                   <p className="font-semibold text-amber-300">Le match est prêt!</p>
-                  <p className="text-sm text-amber-200">Les deux équipes ont sélectionné leurs joueurs.</p>
+                  <p className="text-sm text-amber-200">Les deux équipes ont sélectionné leurs joueurs. Le pick & ban doit être terminé avant le début du match.</p>
                 </div>
               </div>
               <motion.button
-                onClick={handleConfirmMatchReady}
+                onClick={() => setActiveTab('pickban')}
                 disabled={confirmingReady}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -264,7 +287,7 @@ const MatchDetail = () => {
                   </>
                 ) : (
                   <>
-                    ✓ Confirmer et commencer
+                    Faire le Pick & Ban
                   </>
                 )}
               </motion.button>
@@ -274,7 +297,7 @@ const MatchDetail = () => {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-slate-700 overflow-x-auto">
-          {['overview', 'score', 'pickban', 'players', 'score-submit', 'chat'].map((tab) => (
+          {['overview', ...(isAdmin ? ['score'] : []), 'pickban', 'players', 'score-submit', 'chat'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -318,7 +341,7 @@ const MatchDetail = () => {
                   <div className="flex justify-between items-center pb-3 border-b border-slate-700">
                     <span className="text-slate-400">Statut:</span>
                     <span className={`font-bold ${isComplete ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {isComplete ? 'Terminé' : 'En cours'}
+                      {isComplete ? 'Terminé' : matchStatus === 'ongoing' ? 'En cours' : matchStatus === 'ready' ? 'Prêt pour pick & ban' : 'En attente'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pb-3 border-b border-slate-700">
@@ -353,7 +376,7 @@ const MatchDetail = () => {
                           <p className="font-semibold text-white">{map.mapName}</p>
                           {map.mode && <p className="text-xs text-slate-400">{map.mode}</p>}
                         </div>
-                        <p className="text-xs text-purple-300">Choisi par l'équipe</p>
+                        <p className="text-xs text-purple-300">Choisi par {getPickingTeamName(map)}</p>
                       </div>
                     ))}
                   </div>
@@ -372,7 +395,7 @@ const MatchDetail = () => {
               team2={team2}
               matchFormat={match.matchFormat}
               onScoreUpdate={handleScoreUpdate}
-              isAdmin={true}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -383,7 +406,7 @@ const MatchDetail = () => {
                 <MatchPickAndBan
                   match={match}
                   mapPool={match.mapPoolId?._id || match.mapPoolId}
-                  isTeamCaptain={true}
+                  isTeamCaptain={!!userTeamId}
                   teamId={userTeamId}
                   onComplete={handlePickAndBanComplete}
                 />
@@ -405,15 +428,15 @@ const MatchDetail = () => {
               >
                 <h3 className="text-lg font-bold text-purple-400 mb-4">{team1?.name || 'Équipe 1'}</h3>
                 <div className="space-y-2">
-                  {team1?.players && team1.players.length > 0 ? (
-                    team1.players.map((player) => (
-                      <div key={player._id} className="p-2 bg-slate-700/50 rounded border border-slate-600">
-                        <p className="font-semibold text-white">{player.username}</p>
-                        <p className="text-xs text-slate-400">{player.role}</p>
+                  {match.team1?.selectedPlayers && match.team1.selectedPlayers.length > 0 ? (
+                    match.team1.selectedPlayers.map((player, index) => (
+                      <div key={player._id || index} className="p-2 bg-slate-700/50 rounded border border-slate-600">
+                        <p className="font-semibold text-white">{getPlayerName(player, `Joueur ${index + 1}`)}</p>
+                        {player.inGameName && <p className="text-xs text-slate-400">{player.inGameName}</p>}
                       </div>
                     ))
                   ) : (
-                    <p className="text-slate-400">Pas de joueurs</p>
+                    <p className="text-slate-400">Aucun joueur sélectionné</p>
                   )}
                 </div>
               </motion.div>
@@ -426,15 +449,15 @@ const MatchDetail = () => {
               >
                 <h3 className="text-lg font-bold text-purple-400 mb-4">{team2?.name || 'Équipe 2'}</h3>
                 <div className="space-y-2">
-                  {team2?.players && team2.players.length > 0 ? (
-                    team2.players.map((player) => (
-                      <div key={player._id} className="p-2 bg-slate-700/50 rounded border border-slate-600">
-                        <p className="font-semibold text-white">{player.username}</p>
-                        <p className="text-xs text-slate-400">{player.role}</p>
+                  {match.team2?.selectedPlayers && match.team2.selectedPlayers.length > 0 ? (
+                    match.team2.selectedPlayers.map((player, index) => (
+                      <div key={player._id || index} className="p-2 bg-slate-700/50 rounded border border-slate-600">
+                        <p className="font-semibold text-white">{getPlayerName(player, `Joueur ${index + 1}`)}</p>
+                        {player.inGameName && <p className="text-xs text-slate-400">{player.inGameName}</p>}
                       </div>
                     ))
                   ) : (
-                    <p className="text-slate-400">Pas de joueurs</p>
+                    <p className="text-slate-400">Aucun joueur sélectionné</p>
                   )}
                 </div>
               </motion.div>
@@ -442,7 +465,7 @@ const MatchDetail = () => {
           )}
 
           {/* Score Submission Tab */}
-          {activeTab === 'score-submit' && (isMatchOngoing || isAdmin) && (
+          {activeTab === 'score-submit' && canEnterScores && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -457,13 +480,13 @@ const MatchDetail = () => {
             </motion.div>
           )}
 
-          {activeTab === 'score-submit' && !isMatchOngoing && !isAdmin && (
+          {activeTab === 'score-submit' && !canEnterScores && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 text-center text-slate-400"
             >
-              <p>Le match doit être en cours (ongoing) pour soumettre un score</p>
+              <p>Le match doit être en cours et le pick & ban doit être terminé pour soumettre un score.</p>
             </motion.div>
           )}
 

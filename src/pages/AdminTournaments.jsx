@@ -33,7 +33,8 @@ const AdminTournaments = () => {
     format: 'single-elimination',
     mapPoolId: '',
     matchFormat: 'bo3',
-    finalFormat: 'bo5'
+    finalFormat: 'bo5',
+    weight: 1.0
   });
 
   const formatOptions = [
@@ -41,6 +42,14 @@ const AdminTournaments = () => {
     { value: 'double-elimination', label: 'Double élimination' },
     { value: 'round-robin', label: 'Round Robin' },
     { value: 'swiss', label: 'Swiss' }
+  ];
+
+  const weightPresets = [
+    { value: 0.5, label: 'Minor (0.5x) - Petits tournois' },
+    { value: 1.0, label: 'Regular (1.0x) - Standard' },
+    { value: 1.5, label: 'Important (1.5x) - Régional' },
+    { value: 2.0, label: 'Major (2.0x) - Majeur' },
+    { value: 3.0, label: 'Championship (3.0x) - Championnat' }
   ];
 
   useEffect(() => {
@@ -84,7 +93,8 @@ const AdminTournaments = () => {
         format: tournament.format,
         mapPoolId: tournament.mapPoolId || '',
         matchFormat: tournament.matchFormat || 'bo3',
-        finalFormat: tournament.finalFormat || 'bo5'
+        finalFormat: tournament.finalFormat || 'bo5',
+        weight: tournament.weight || 1.0
       });
       
       // Charger les map pools pour ce jeu
@@ -111,7 +121,8 @@ const AdminTournaments = () => {
         format: 'single-elimination',
         mapPoolId: '',
         matchFormat: 'bo3',
-        finalFormat: 'bo5'
+        finalFormat: 'bo5',
+        weight: 1.0
       });
       setMapPools([]); // Réinitialiser les map pools
     }
@@ -138,7 +149,7 @@ const AdminTournaments = () => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'maxTeams' || name === 'prizePool' ? Number(value) : value
+      [name]: name === 'maxTeams' || name === 'prizePool' ? Number(value) : (name === 'weight' ? parseFloat(value) : value)
     }));
 
     // Si on change le jeu, charger les map pools pour ce jeu
@@ -186,7 +197,8 @@ const AdminTournaments = () => {
         format: formData.format || 'single-elimination',
         mapPoolId: formData.mapPoolId || null,
         matchFormat: formData.matchFormat || 'bo3',
-        finalFormat: formData.finalFormat || 'bo5'
+        finalFormat: formData.finalFormat || 'bo5',
+        weight: formData.weight || 1.0
       };
 
       console.log('Submitting tournament data:', submitData);
@@ -363,6 +375,10 @@ const AdminTournaments = () => {
                   <div className="flex items-center gap-2 text-gray-300">
                     <Trophy className="w-4 h-4 text-primary-500" />
                     <span className="text-sm capitalize">{tournament.format.replace('-', ' ')}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-yellow-400">
+                    <Zap className="w-4 h-4" />
+                    <span className="text-sm font-semibold">Weight: {tournament.weight || 1.0}x</span>
                   </div>
                 </div>
 
@@ -626,6 +642,36 @@ const AdminTournaments = () => {
                         <option value="bo7">BO7</option>
                         <option value="bo9">BO9</option>
                       </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ladder Weight Settings */}
+                <div className="border border-dashed border-yellow-500/30 rounded-lg p-4 bg-yellow-500/10">
+                  <h3 className="text-lg font-bold text-yellow-400 mb-4">⚖️ Poids pour la Ladder</h3>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Multiplicateur de Points (Weight)
+                    </label>
+                    <select
+                      name="weight"
+                      value={formData.weight}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-primary-500"
+                    >
+                      {weightPresets.map(preset => (
+                        <option key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-2">
+                      ℹ️ Les points ladder seront multipliés par ce facteur pour chaque placement
+                    </p>
+                    <div className="mt-2 p-2 bg-dark-700/50 rounded text-xs text-gray-300">
+                      <p className="font-semibold">Exemple: 1er place</p>
+                      <p>Weight {formData.weight}: 50 × {formData.weight} = <span className="text-yellow-400 font-bold">{50 * formData.weight} points</span></p>
                     </div>
                   </div>
                 </div>

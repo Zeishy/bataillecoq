@@ -114,7 +114,7 @@ export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId
       const playerIds = [
         ...(registration.players || []),
         ...(registration.substitutes || [])
-      ];
+      ].map(id => (id?._id || id).toString());
 
       console.log('📊 Joueurs inscrits:', {
         titulaires: registration.players?.length || 0,
@@ -123,10 +123,23 @@ export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId
       });
 
       // ✅ Filtrer les joueurs de l'équipe qui sont dans la liste d'inscription
-      const players = (teamData.players || []).filter(p => {
-        const playerId = p.playerId?._id || p.playerId?.userId?._id || p.userId?._id || p._id;
-        return playerIds.some(pid => pid.toString() === playerId.toString());
-      });
+      const getPlayerCandidateIds = (p) => [
+        p.playerId?._id,
+        p.playerId,
+        p.playerId?.userId?._id,
+        p.playerId?.userId,
+        p.userId?._id,
+        p.userId,
+        p._id
+      ].filter(Boolean).map(id => id.toString());
+
+      const players = (teamData.players || [])
+        .map(p => {
+          const candidateIds = getPlayerCandidateIds(p);
+          const registeredId = candidateIds.find(id => playerIds.includes(id));
+          return registeredId ? { ...p, _registeredPlayerId: registeredId } : null;
+        })
+        .filter(Boolean);
 
       if (players.length === 0) {
         console.warn('⚠️ Aucun joueur trouvé pour l\'équipe');
@@ -360,7 +373,7 @@ export default function SelectMatchPlayersModal({ isOpen, onClose, match, teamId
                     ) : (
                       <div className="space-y-2 max-h-80 overflow-y-auto">
                         {availablePlayers.map((player, index) => {
-                          const playerId = player.playerId?._id || player.playerId?.userId?._id || player.userId?._id || player._id;
+                          const playerId = player._registeredPlayerId || player.playerId?._id || player.playerId?.userId?._id || player.userId?._id || player._id;
                           
                           let playerName = 'Joueur inconnu';
                           if (player.playerId?.userId?.username) {

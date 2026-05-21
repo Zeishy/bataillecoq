@@ -1,5 +1,32 @@
 import mongoose from 'mongoose';
 
+const pointsHistorySchema = new mongoose.Schema({
+  tournamentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tournament'
+  },
+  tournamentName: String,
+  placement: Number,
+  weight: {
+    type: Number,
+    default: 1.0
+  },
+  matchesWon: {
+    type: Number,
+    default: 0
+  },
+  placementPoints: Number,
+  matchPoints: {
+    type: Number,
+    default: 0
+  },
+  pointsEarned: Number,
+  earnedAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false });
+
 const ladderSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,10 +46,16 @@ const ladderSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  tournamentsParticipated: {
+    type: Number,
+    default: 0
+  },
   tournamentsWon: {
     type: Number,
     default: 0
   },
+  // New: Track points by tournament
+  pointsHistory: [pointsHistorySchema],
   rank: {
     type: Number
   },
